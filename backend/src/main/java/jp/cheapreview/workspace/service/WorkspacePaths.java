@@ -24,11 +24,15 @@ public final class WorkspacePaths {
   }
 
   public static void requireWithinRoot(Path path, Path root) throws IOException {
-    if (!path.toAbsolutePath().normalize().startsWith(root)) {
+    Path absoluteRoot = root.toAbsolutePath().normalize();
+    Path absolutePath = path.toAbsolutePath().normalize();
+    if (!absolutePath.startsWith(absoluteRoot)) {
       throw new IOException("INVALID_SCOPE");
     }
-    rejectLinks(path);
-    if (!path.toRealPath().startsWith(root)) {
+    // Reject links before resolving aliases, so canonicalization cannot hide a junction.
+    rejectLinks(root.toAbsolutePath());
+    rejectLinks(path.toAbsolutePath());
+    if (!absolutePath.toRealPath().startsWith(absoluteRoot.toRealPath())) {
       throw new IOException("INVALID_SCOPE");
     }
   }

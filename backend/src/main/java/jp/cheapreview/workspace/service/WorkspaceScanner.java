@@ -58,8 +58,9 @@ public class WorkspaceScanner {
 
   public Snapshot scan(Path root, Options options) throws IOException {
     WorkspacePaths.requireWithinRoot(root, root);
-    ScanTraversal traversal = new ScanTraversal(root, options);
-    Files.walkFileTree(root, traversal);
+    Path validatedRoot = WorkspacePaths.validateRoot(root.toUri().toString());
+    ScanTraversal traversal = new ScanTraversal(validatedRoot, options);
+    Files.walkFileTree(validatedRoot, traversal);
     return traversal.snapshot();
   }
 

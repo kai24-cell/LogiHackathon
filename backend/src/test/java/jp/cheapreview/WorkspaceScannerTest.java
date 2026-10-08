@@ -91,6 +91,51 @@ class WorkspaceScannerTest {
   }
 
   @Test
+  void acceptsEquivalentRootSpellingsAndRejectsTraversalOutsideRoot() throws Exception {
+    Path allowed = Files.createDirectory(root.resolve("allowed"));
+    Path file = write("allowed/Allowed.java", "class Allowed {}");
+    Path outside = write("Outside.java", "class Outside {}");
+    Path equivalentRoot = allowed.resolve(".");
+
+    WorkspacePaths.requireWithinRoot(file, equivalentRoot);
+    var snapshot =
+        new WorkspaceScanner(100, 100, 1000, 60)
+            .scan(equivalentRoot, new Options(false, false, false));
+    assertEquals(1, snapshot.files().size());
+    assertEquals("Allowed.java", snapshot.files().getFirst().relativePath());
+    assertThrows(
+        java.io.IOException.class,
+        () ->
+            WorkspacePaths.requireWithinRoot(
+                allowed.resolve("..").resolve(outside.getFileName()), equivalentRoot));
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+  void acceptsWindowsShortRootSpelling() throws Exception {
+    Path allowed = Files.createDirectory(root.resolve("long-workspace-directory"));
+    Files.writeString(allowed.resolve("Allowed.java"), "class Allowed {}");
+    Process shortPath =
+        new ProcessBuilder("cmd.exe", "/c", "for %I in (\"" + allowed + "\") do @echo %~sI")
+            .redirectErrorStream(true)
+            .start();
+    assertTrue(shortPath.waitFor(5, java.util.concurrent.TimeUnit.SECONDS));
+    assertEquals(0, shortPath.exitValue());
+    Path shortRoot =
+        Path.of(
+            new String(
+                    shortPath.getInputStream().readAllBytes(),
+                    java.nio.charset.Charset.defaultCharset())
+                .strip());
+    assertEquals(allowed.toRealPath(), shortRoot.toRealPath());
+    WorkspacePaths.requireWithinRoot(shortRoot, shortRoot);
+    var snapshot =
+        new WorkspaceScanner(100, 100, 1000, 60).scan(shortRoot, new Options(false, false, false));
+    assertEquals(1, snapshot.files().size());
+    assertEquals("Allowed.java", snapshot.files().getFirst().relativePath());
+  }
+
+  @Test
   @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
   void rejectsJunctionRootsAndDoesNotFollowJunctionChildren() throws Exception {
     Path allowed = Files.createDirectory(root.resolve("allowed"));
