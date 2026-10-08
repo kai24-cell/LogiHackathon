@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import type { JavaAnalysis } from "../../types/analysis";
 import type {
   BridgeRequest,
   Snapshot,
@@ -19,6 +20,7 @@ export function useWorkspace() {
   const [busy, setBusy] = useState(false);
   const [workspace, setWorkspace] = useState<{ id: string; name: string }>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [analysis, setAnalysis] = useState<JavaAnalysis>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [options, setOptions] = useState<ScanOptions>({
     includeTests: false,
@@ -37,6 +39,7 @@ export function useWorkspace() {
       setTimeout(resolve, REQUEST_POLL_INTERVAL_MS),
     );
   async function scan(id: string) {
+    setAnalysis(undefined);
     const { scanJobId } = await api<{ scanJobId: string }>(
       `/workspaces/${id}/scan`,
       options,
@@ -110,12 +113,34 @@ export function useWorkspace() {
       setBusy(false);
     }
   }
+  async function analyzeJava() {
+    if (!workspace || !snapshot) return;
+    setBusy(true);
+    setMessage("Javaを解析しています。");
+    try {
+      const result = await api<JavaAnalysis>(
+        `/workspaces/${workspace.id}/snapshots/${snapshot.snapshotId}/java-analysis`,
+      );
+      if (alive.current) {
+        setAnalysis(result);
+        setMessage(
+          "Java解析が完了しました。解析失敗・未解決の参照も確認してください。",
+        );
+      }
+    } catch (error) {
+      if (alive.current) setMessage(String(error));
+    } finally {
+      if (alive.current) setBusy(false);
+    }
+  }
   return {
     status,
     message: message || connectionMessage,
     busy,
     workspace,
     snapshot,
+    analysis,
+    analyzeJava,
     selected,
     setSelected,
     options,

@@ -27,7 +27,7 @@ public class WorkspaceService {
   private final int maxJobs;
   private final ExecutorService executor;
   private final Map<String, Path> roots = new HashMap<>();
-  private final Map<String, Snapshot> snapshots = new HashMap<>();
+  private final Map<String, WorkspaceCapture> snapshots = new HashMap<>();
   private final Map<String, ScanJob> jobs = new LinkedHashMap<>();
   private String activeJobId;
 
@@ -94,21 +94,30 @@ public class WorkspaceService {
   }
 
   public synchronized Snapshot getSnapshot(String workspaceId) {
-    Snapshot snapshot = snapshots.get(workspaceId);
-    if (snapshot == null) {
+    WorkspaceCapture capture = snapshots.get(workspaceId);
+    if (capture == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "NOT_SCANNED");
     }
-    return snapshot;
+    return capture.snapshot();
+  }
+
+  public synchronized WorkspaceCapture getCapture(String workspaceId, String snapshotId) {
+    getSnapshot(workspaceId);
+    WorkspaceCapture capture = snapshots.get(workspaceId);
+    if (!capture.snapshot().snapshotId().equals(snapshotId)) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "STALE_SNAPSHOT");
+    }
+    return capture;
   }
 
   private void runScan(String jobId, String workspaceId, Path root, Options options) {
     synchronized (this) {
       jobs.put(jobId, new ScanJob(jobId, JobState.SCANNING, null));
     }
-    Snapshot snapshot = null;
+    WorkspaceCapture snapshot = null;
     ScanJob completedJob;
     try {
-      snapshot = scanner.scan(root, options);
+      snapshot = scanner.capture(root, options);
       completedJob = new ScanJob(jobId, JobState.SUCCEEDED, null);
     } catch (Exception exception) {
       completedJob = new ScanJob(jobId, JobState.FAILED, "SCAN_FAILED");

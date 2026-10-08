@@ -1,7 +1,7 @@
 # CheapReview
 
 Windowsのローカルブラウザで動くSpring Bootコード理解・レビュー支援アプリです。
-今回の実装範囲は **Web表示 → VS Code拡張接続 → フォルダ選択 → ファイル走査** です。
+今回の実装範囲は **Web表示 → VS Code拡張接続 → フォルダ選択 → ファイル走査 → Java解析** です。
 生成・翻訳・会話TXTは後続段階の必須仕様として扱い、この段階では外部AI APIを呼び出しません。
 
 ## 設計書
@@ -124,9 +124,11 @@ VS CodeのGUIはHTTPクライアントで代行します。Gemini・Cloud Transl
 | backend/.../bridge/service | 接続期限、要求キュー、原子的claimと完了処理 |
 | backend/.../workspace/controller | 走査・ジョブ・一覧APIのHTTP受付 |
 | backend/.../workspace/service | 許可root、非同期走査、スナップショット、パス検証・ファイル読取 |
+| backend/.../analysis/{controller,dto,service} | Java構造・Spring役割・依存辺の抽出と結果取得API |
 | backend/.../{bridge,workspace}/dto | 型付きAPI入出力と状態enum |
 | backend/.../api、security | 共通エラーとローカル通信の検証 |
 | web/src/features/workspace | 接続監視・走査操作のReact hook |
+| web/src/features/analysis | 型・メソッド・依存・未解決参照の表示 |
 | web/src/main.tsx | 画面表示 |
 | extension/src/bridge.ts | VS CodeダイアログとSpringへのポーリング |
 
@@ -147,9 +149,36 @@ Controllerにメモリ状態やExecutorを置きません。ブリッジの状�
 旧 `cheapreview.scan.max-files` は廃止したため、外部設定で使用している場合は上記の2設定へ移行してください。
 UTF-8読込失敗や上限到達は日本語の警告を表示し、合計容量・対象ファイル数・訪問数・時間の上限で終了した場合は「一部のみ走査されました」と明示します。
 単一ファイルの容量超過はそのファイルを除外して継続します。警告のパスなどの詳細と未知の警告コードも表示します。
-スナップショットはメモリ内で相対パス・sha256・サイズを保持します。
+スナップショットはメモリ内で相対パス・sha256・サイズと、解析用の走査済みJava原文を保持します。原文と絶対rootはバックエンド専用で、ファイル一覧APIには含めません。
 秘密を含まない設定例は `backend/config/application.example.properties` です。
 必要に応じてSpringの外部設定ファイルや環境変数で変更してください。外部API認証の実値をリポジトリへ保存しないでください。
+
+## Java解析（Issue #4）
+
+起動後、専用サンプル [samples/java-analysis](samples/java-analysis/README.md) を選択して走査し、「Java解析」を押してください。
+各ファイルを展開するとpackage、型、フィールド、constructor・methodの署名と行位置、Spring役割の根拠を確認できます。
+依存関係と未解決参照は別々に表示します。意図的な構文エラーの `Broken.java` が失敗しても、他の6ファイルは継続します。
+
+JavaParser/SymbolSolverは3.27.1に固定し、Java 21構文で解析します。ソースルート単位のJavaParserTypeSolverには走査済みASTだけを返すキャッシュを渡し、ReflectionTypeSolverはJDKの型を解決します。
+対象プロジェクトをビルド・実行したり、依存や除外ファイルを読み込んだりしません。解析中も走査時の原文を使用し、変更後の内容には再走査が必要です。
+
+| 依存辺 | 根拠 |
+| --- | --- |
+| TYPE_REFERENCE | 型・フィールド・引数・戻り値などで使用するプロジェクト内の型 |
+| FIELD_DI | Autowired / Inject / Resourceを付けたフィールドの型 |
+| CONSTRUCTOR_DI | 唯一のconstructor、またはAutowired / Inject付きconstructorの引数型 |
+| METHOD_CALL | 実際のメソッド呼出し。importだけでは作成しない |
+
+辺は方向、参照元行、confidence、RESOLVED / HEURISTICを保持します。RESOLVEDはSymbolSolverの解決結果、HEURISTICは構文上の型候補または明示レシーバと同名署名の一意候補です。
+曖昧な型・オーバーロード、型不明の引数、未解決のvarargs変換などを断定しません。Spring/JPA等の外部依存、Lombok、動的DI、反射は完全には解決できず、未解決は「依存なし」ではありません。
+Spring役割はannotation/typeの構文上の根拠と信頼度を付け、DTOの名前だけによる判定は低信頼として区別します。
+
+結果取得APIは `GET /api/v1/workspaces/{workspaceId}/snapshots/{snapshotId}/java-analysis`（接続トークン必須）です。
+現在の走査結果とsnapshotIdが違う場合は409 `STALE_SNAPSHOT` を返します。後続の検索・予算・生成用APIは追加していません。
+型・メソッドIDは相対パス・完全修飾型名・署名から作り、オーバーロードを区別します。行番号は1始まり・両端を含み、本文はAST整形せず原文を切り出します。
+解析失敗ファイルも一覧・原文を保持し、ファイル全体を選択できます。メソッド抽出・圧縮へのフォールバック処理は後続Issueの対象です。
+
+検証内容・制限は [Issue #4検証記録](docs/issue04-validation.md) に記載します。
 
 ## ZIP作成
 
@@ -166,7 +195,8 @@ Git管理対象に実キー・認証JSONを入れないでください。作成�
 
 ## Design deviations
 
-- 今回は初期構築・ブリッジ・ファイル走査までです。AST解析、CURRENT_FILE/OPEN_REFERENCE、検索・予算、4モード、生成・翻訳、会話TXT、第16章の完成デモと比較実験は後続です。第21章を任意機能へ変更していません。
+- 今回は初期構築・ブリッジ・ファイル走査・Java解析までです。CURRENT_FILE/OPEN_REFERENCE、検索・予算、4モード、生成・翻訳、会話TXT、第16章の完成デモと比較実験は後続です。第21章を任意機能へ変更していません。
+- Issue #4の結果確認用にsnapshotを明示する同期GET APIとWebの「Java解析」を追加しました。生成用のpreview/job APIは後続です。JavaParserTypeSolverのキャッシュは走査済み原文から構築し、ライブラリの通常のディスク再読込を遮断します。変更後ファイル・除外ファイル・複数ソースルートをテストします。
 - ファイル一覧は相対パス順のチェックリストです。階層ツリーは後続で拡張します。
 - 詳細設計8.1の対象ファイル10,000件上限と別に、訪問数100,000件の暫定上限を設けます。通常のフォルダ・対象外ファイルが対象ファイル枠を消費しないようにしつつ、大量の対象外項目や空フォルダの走査を制限します。両方の境界と警告をテストします。
 - 接続が一時的に切れても登録済みワークスペースはアプリ終了まで保持します。再接続時は旧フォルダ要求を破棄し、古いbridgeIdの結果を拒否します。
