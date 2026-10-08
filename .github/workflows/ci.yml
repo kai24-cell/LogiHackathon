@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build:
+    name: Windows checks, build and integration
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            extension/package-lock.json
+
+      - name: Set up Python for the local integration test
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Reuse the checked local pipeline. It uses npm ci, format:check, lint,
+      # typecheck, test -- --run and build for both TypeScript packages, then
+      # Maven Wrapper verify (including Spotless check) and VSIX packaging.
+      # Do not call format or spotless:apply in CI.
+      - name: Check formatting, lint, types, tests and build jar and VSIX
+        run: .\scripts\build.ps1
+
+      # Starts only our packaged application on 127.0.0.1, using a generated
+      # connection token. No Gemini/Translation keys or credentials are needed.
+      - name: Test packaged Web and workspace integration on Windows
+        run: python scripts/smoke_test.py
+
+      - name: Save VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheapreview-vsix
+          path: dist/*.vsix
+          if-no-files-found: error
+          retention-days: 7

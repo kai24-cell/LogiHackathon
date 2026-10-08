@@ -97,6 +97,24 @@ npm.cmd run build
 JUnitでは実ファイル走査、サイズ境界、不正UTF-8、hash、Host/Origin/token、要求の原子的claim、期限切れ、走査の同時実行制限を検証します。
 Vitestでは接続fragmentの消費・除去とruntime入力検証を確認します。外部AI APIはテストから呼びません。
 
+## GitHub Actions CI
+
+[CIワークフロー](.github/workflows/ci.yml)は全てのpull requestとmainへのpushで実行します。
+Windows限定アプリのため、ビルド・JUnit（junction検証を含む）・実サーバー連携テストをWindows 2022 runnerで行います。
+JavaはTemurin 21、Node.jsはローカル検証に合わせた24.13.0、補助スモークテストはPython 3.12を使用します。
+
+既存の `scripts/build.ps1` を実行し、Web・拡張それぞれの `npm ci`、`format:check`、`lint`、`typecheck`、`test -- --run`、`build` を確認します。
+バックエンドはMaven Wrapperの `verify` でJUnit・ビルド・Spotless＋google-java-formatのチェックを行います。
+CIでは `format` や `spotless:apply` を実行せず、整形違反は失敗として扱います。
+Windowsのcheckoutでも整形結果を一致させるため、`.gitattributes` で標準の改行をLF、`.cmd` をCRLFに固定しています。
+
+ビルド後に `python scripts/smoke_test.py` でjarを127.0.0.1へ一時起動し、Web配信・接続トークン・フォルダ登録・実ファイル走査を検証します。
+VS CodeのGUIはHTTPクライアントで代行します。Gemini・Cloud Translationへの実通信は行わず、APIキーやGitHub Secretsの登録は不要です。
+
+成功した実行のActions画面から成果物 `cheapreview-vsix` を取得できます。VSIXのみを7日間保存し、ソース・キャッシュ・runtime.jsonを成果物に含めません。
+ワークフローの権限は `contents: read` のみにし、checkoutの認証情報を残さず、同一ブランチの古い実行はキャンセルします。
+依存取得用のネットワーク接続は必要です。CIは公開・デプロイ・コミット・pushを行いません。
+
 ## 構成と責務
 
 | 場所 | 責務 |
