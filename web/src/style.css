@@ -1,0 +1,95 @@
+:root {
+  font-family: "Segoe UI", "Yu Gothic UI", sans-serif;
+  color: #17332e;
+  background: #f2f5f2;
+  font-synthesis: none;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1000px;
+  padding: 40px 24px;
+  margin: auto;
+}
+h1 {
+  font-size: 44px;
+  margin: 4px 0 16px;
+}
+h2 {
+  font-size: 21px;
+}
+.eyebrow {
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  color: #3c7162;
+}
+section,
+details {
+  background: white;
+  border: 1px solid #d6e0d9;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+}
+button {
+  background: #21634f;
+  color: white;
+  border: 0;
+  padding: 12px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+}
+fieldset {
+  border: 0;
+  padding: 16px 0;
+}
+fieldset label {
+  margin-right: 16px;
+}
+input {
+  margin-right: 10px;
+}
+ul {
+  list-style: none;
+  padding: 0;
+}
+li {
+  border-top: 1px solid #edf0ed;
+  padding: 12px 0;
+}
+li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+li span {
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+small {
+  color: #63746b;
+}
+.warning {
+  color: #8c5305;
+}
+@media (max-width: 600px) {
+  main {
+    padding: 20px 12px;
+  }
+  section {
+    padding: 16px;
+  }
+  fieldset label {
+    display: block;
+    margin: 10px 0;
+  }
+}

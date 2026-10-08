@@ -76,3 +76,30 @@
 - Windowsの起動・ビルド・ZIP作成手順とVSIX導入手順をREADMEに整備する。
 - 提出ZIPに実キー、認証JSON、runtime.json、利用者のコード、node_modules、依存キャッシュを含めない。
 - 仕様の実装上の調整はREADMEのDesign deviationsへ理由と検証を記載する。ユーザー決定を変更する必要がある場合のみ判断を求める。
+
+## Javaの構成と責務
+
+- Spring Boot起動クラスはjp.cheapreview直下に置く。
+- 詳細設計に合わせ、bridge、workspace、analysisなど機能単位で
+  パッケージを分ける。
+- 各機能の中に、必要に応じてcontroller、service、dto、model、
+  storeを設ける。不要な空パッケージは作らない。
+
+- ControllerはHTTPの受付、入力検証、Serviceの呼び出し、
+  レスポンスの返却を担当する。
+- 業務処理、接続状態の管理、走査ジョブの管理、非同期処理は
+  Controllerに直接実装せず、対応するServiceなどへ分離する。
+- APIの入出力には型付きDTOを使う。
+  固定構造のレスポンスをMap<String, Object>で表現しない。
+- 要求状態やジョブ状態はenumで表現する。
+- DBは使用しない。RepositoryやJPAは追加しない。
+- 並行処理では、個々のMapの安全性だけでなく、
+  状態更新全体の整合性も考慮する。
+
+## 可読性と整形
+
+- 複数の文や分岐を1行に詰め込まない。
+- ワイルドカードimportを使わない。
+- 意味の分かる変数名を使う。
+- Spotlessとgoogle-java-formatで整形する。
+- 整形だけで完了とせず、責務の分離とロジックも確認する。

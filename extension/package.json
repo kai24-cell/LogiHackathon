@@ -1,0 +1,45 @@
+{
+  "name": "cheapreview",
+  "displayName": "CheapReview",
+  "description": "Local Spring Boot code review workspace bridge",
+  "publisher": "cheapreview-local",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cheapreview.openWeb",
+        "title": "CheapReview: Open Web"
+      }
+    ]
+  },
+  "scripts": {
+    "format": "prettier --write src *.mjs *.json",
+    "format:check": "prettier --check src *.mjs *.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest",
+    "package": "vsce package --no-dependencies --out ../dist/cheapreview-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "22.18.6",
+    "@types/vscode": "1.95.0",
+    "@vscode/vsce": "4.0.0",
+    "eslint": "9.39.5",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.71.1",
+    "vitest": "3.2.7"
+  }
+}
