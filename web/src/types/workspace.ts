@@ -16,6 +16,11 @@ export interface Snapshot {
   files: SourceFile[];
   warnings: string[];
 }
+export interface ScanOptions {
+  includeTests: boolean;
+  includeGenerated: boolean;
+  includeConfig: boolean;
+}
 export interface BridgeRequest {
   requestId: string;
   status: "pending" | "claimed" | "completed" | "cancelled" | "failed";

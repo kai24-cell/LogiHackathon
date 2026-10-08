@@ -34,24 +34,28 @@ public class WorkspaceScanner {
   private static final String APPLICATION_CONFIG_PATTERN =
       "application(?:-[a-z0-9_-]+)?\\.(yml|yaml|properties)";
   private final long maxFileBytes;
-  private final int maxFiles;
+  private final int maxVisitedEntries;
+  private final int maxSourceFiles;
   private final long maxTotalBytes;
   private final Duration timeout;
 
   public WorkspaceScanner(
       @Value("${cheapreview.scan.max-file-bytes}") long maxFileBytes,
-      @Value("${cheapreview.scan.max-files}") int maxFiles,
+      @Value("${cheapreview.scan.max-visited-entries}") int maxVisitedEntries,
+      @Value("${cheapreview.scan.max-source-files}") int maxSourceFiles,
       @Value("${cheapreview.scan.max-total-bytes}") long maxTotalBytes,
       @Value("${cheapreview.scan.timeout-seconds}") long timeoutSeconds) {
     if (maxFileBytes <= 0
         || maxFileBytes >= Integer.MAX_VALUE
-        || maxFiles <= 0
+        || maxVisitedEntries <= 0
+        || maxSourceFiles <= 0
         || maxTotalBytes <= 0
         || timeoutSeconds <= 0) {
       throw new IllegalArgumentException("Invalid scan limits");
     }
     this.maxFileBytes = maxFileBytes;
-    this.maxFiles = maxFiles;
+    this.maxVisitedEntries = maxVisitedEntries;
+    this.maxSourceFiles = maxSourceFiles;
     this.maxTotalBytes = maxTotalBytes;
     timeout = Duration.ofSeconds(timeoutSeconds);
   }
@@ -108,7 +112,7 @@ public class WorkspaceScanner {
     private final List<String> warnings = new ArrayList<>();
     private final long startedNanos = System.nanoTime();
     private long totalBytes;
-    private int visitedEntries;
+    private long visitedEntries;
 
     private ScanTraversal(Path root, Options options) {
       this.root = root;
@@ -125,8 +129,8 @@ public class WorkspaceScanner {
         return true;
       }
       // Count directories as well, so a tree of empty folders cannot bypass the limit.
-      if (++visitedEntries > maxFiles) {
-        warnings.add("FILE_COUNT_LIMIT");
+      if (++visitedEntries > maxVisitedEntries) {
+        warnings.add("VISITED_ENTRY_LIMIT");
         return true;
       }
       return false;
@@ -134,11 +138,11 @@ public class WorkspaceScanner {
 
     @Override
     public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
-      if (!directory.equals(root) && excludeDirectory(fileName(directory), options)) {
-        return FileVisitResult.SKIP_SUBTREE;
-      }
       if (shouldStop()) {
         return FileVisitResult.TERMINATE;
+      }
+      if (!directory.equals(root) && excludeDirectory(fileName(directory), options)) {
+        return FileVisitResult.SKIP_SUBTREE;
       }
       try {
         WorkspacePaths.requireWithinRoot(directory, root);
@@ -161,6 +165,10 @@ public class WorkspaceScanner {
       String name = fileName(path);
       if (!eligibleFile(name, options)) {
         return FileVisitResult.CONTINUE;
+      }
+      if (files.size() >= maxSourceFiles) {
+        warnings.add("SOURCE_FILE_COUNT_LIMIT");
+        return FileVisitResult.TERMINATE;
       }
       String relativePath = root.relativize(path).toString().replace('\\', '/');
       if (attributes.size() > maxFileBytes) {

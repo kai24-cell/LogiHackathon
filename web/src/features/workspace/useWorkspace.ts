@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
-import type { BridgeRequest, Snapshot } from "../../types/workspace";
+import type {
+  BridgeRequest,
+  Snapshot,
+  ScanOptions,
+} from "../../types/workspace";
 import {
   REQUEST_POLL_INTERVAL_MS,
   SCAN_WAIT_TIMEOUT_MS,
@@ -16,7 +20,7 @@ export function useWorkspace() {
   const [workspace, setWorkspace] = useState<{ id: string; name: string }>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [options, setOptions] = useState({
+  const [options, setOptions] = useState<ScanOptions>({
     includeTests: false,
     includeGenerated: false,
     includeConfig: false,

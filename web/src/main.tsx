@@ -1,5 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { useWorkspace } from "./features/workspace/useWorkspace";
+import {
+  formatScanWarning,
+  scanOptionLabels,
+} from "./features/workspace/scanPresentation";
 import "./style.css";
 
 function App() {
@@ -47,20 +51,20 @@ function App() {
         </div>
         <fieldset disabled={busy}>
           <legend>走査対象の追加</legend>
-          {(Object.keys(options) as (keyof typeof options)[]).map(
-            (key, index) => (
-              <label key={key}>
-                <input
-                  type="checkbox"
-                  checked={options[key]}
-                  onChange={(event) =>
-                    setOptions({ ...options, [key]: event.target.checked })
-                  }
-                />
-                {["テスト", "生成Javaソース", "application設定"][index]}
-              </label>
-            ),
-          )}
+          {(
+            Object.keys(scanOptionLabels) as (keyof typeof scanOptionLabels)[]
+          ).map((key) => (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={options[key]}
+                onChange={(event) =>
+                  setOptions({ ...options, [key]: event.target.checked })
+                }
+              />
+              {scanOptionLabels[key]}
+            </label>
+          ))}
         </fieldset>
         <p role="status">{message}</p>
         <h3>{workspace?.name ?? "フォルダ未選択"}</h3>
@@ -71,7 +75,7 @@ function App() {
             </p>
             {snapshot.warnings.map((warning, index) => (
               <p className="warning" key={index}>
-                {warning}
+                {formatScanWarning(warning)}
               </p>
             ))}
             <ul>

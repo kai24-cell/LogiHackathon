@@ -31,7 +31,7 @@ class WorkspaceScannerTest {
     write("target/Hidden.java", "class Hidden {}");
     write("credentials.java", "secret");
     write("application.yml", "spring: {}");
-    var scanner = new WorkspaceScanner(1048576, 10000, 104857600, 60);
+    var scanner = new WorkspaceScanner(1048576, 10000, 100, 104857600, 60);
     var snapshot = scanner.scan(root.toRealPath(), new Options(false, false, false));
     assertEquals(1, snapshot.files().size());
     assertEquals("src/main/java/Order.java", snapshot.files().getFirst().relativePath());
@@ -42,7 +42,7 @@ class WorkspaceScannerTest {
   @Test
   void snapshotsHaveStableFileIdsAndChangedHashes() throws Exception {
     Path file = write("Order.java", "class Order {}");
-    var scanner = new WorkspaceScanner(100, 100, 1000, 60);
+    var scanner = new WorkspaceScanner(100, 100, 100, 1000, 60);
     var first = scanner.scan(root, new Options(false, false, false));
     Files.writeString(file, "class Order { int value; }");
     var second = scanner.scan(root, new Options(false, false, false));
@@ -56,7 +56,7 @@ class WorkspaceScannerTest {
     write("Large.java", "x".repeat(101));
     Files.write(root.resolve("Bad.java"), new byte[] {(byte) 0xff});
     var result =
-        new WorkspaceScanner(100, 100, 1000, 60).scan(root, new Options(false, false, false));
+        new WorkspaceScanner(100, 100, 100, 1000, 60).scan(root, new Options(false, false, false));
     assertTrue(result.files().isEmpty());
     assertTrue(result.warnings().stream().anyMatch(s -> s.startsWith("FILE_SIZE_LIMIT")));
     assertTrue(result.warnings().stream().anyMatch(s -> s.startsWith("READ_FAILED")));
@@ -73,13 +73,13 @@ class WorkspaceScannerTest {
     write("First.java", "12345");
     write("Second.java", "12345");
     Options options = new Options(false, false, false);
-    var exact = new WorkspaceScanner(5, 100, 10, 60).scan(root, options);
+    var exact = new WorkspaceScanner(5, 100, 100, 10, 60).scan(root, options);
     assertEquals(2, exact.files().size());
-    var tooSmall = new WorkspaceScanner(5, 100, 9, 60).scan(root, options);
+    var tooSmall = new WorkspaceScanner(5, 100, 100, 9, 60).scan(root, options);
     assertEquals(1, tooSmall.files().size());
     assertTrue(tooSmall.warnings().contains("TOTAL_SIZE_LIMIT"));
-    var limited = new WorkspaceScanner(5, 1, 10, 60).scan(root, options);
-    assertTrue(limited.warnings().contains("FILE_COUNT_LIMIT"));
+    var limited = new WorkspaceScanner(5, 1, 100, 10, 60).scan(root, options);
+    assertTrue(limited.warnings().contains("VISITED_ENTRY_LIMIT"));
   }
 
   @Test
@@ -91,6 +91,38 @@ class WorkspaceScannerTest {
   }
 
   @Test
+  void visitLimitIncludesNonTargetFilesAndExcludedDirectories() throws Exception {
+    write("notes.txt", "not a source file");
+    var scanner = new WorkspaceScanner(100, 1, 100, 1000, 60);
+    var result = scanner.scan(root, new Options(false, false, false));
+    assertTrue(result.files().isEmpty());
+    assertTrue(result.warnings().contains("VISITED_ENTRY_LIMIT"));
+    Files.delete(root.resolve("notes.txt"));
+    Files.createDirectory(root.resolve("target"));
+    result = scanner.scan(root, new Options(false, false, false));
+    assertTrue(result.warnings().contains("VISITED_ENTRY_LIMIT"));
+  }
+
+  @Test
+  void sourceFileLimitIsIndependentOfVisitsAndIncludesConfig() throws Exception {
+    write("Order.java", "class Order {}");
+    write("application.yml", "spring: {}");
+    write("notes.txt", "not a source file");
+    var scanner = new WorkspaceScanner(100, 100, 1, 1000, 60);
+    var exact = scanner.scan(root, new Options(false, false, false));
+    assertEquals(1, exact.files().size());
+    assertTrue(exact.warnings().isEmpty());
+    var limited = scanner.scan(root, new Options(false, false, true));
+    assertEquals(1, limited.files().size());
+    assertTrue(limited.warnings().contains("SOURCE_FILE_COUNT_LIMIT"));
+    assertTrue(!limited.warnings().contains("VISITED_ENTRY_LIMIT"));
+    var expanded =
+        new WorkspaceScanner(100, 100, 2, 1000, 60).scan(root, new Options(false, false, true));
+    assertEquals(2, expanded.files().size());
+    assertTrue(expanded.warnings().isEmpty());
+  }
+
+  @Test
   void acceptsEquivalentRootSpellingsAndRejectsTraversalOutsideRoot() throws Exception {
     Path allowed = Files.createDirectory(root.resolve("allowed"));
     Path file = write("allowed/Allowed.java", "class Allowed {}");
@@ -99,7 +131,7 @@ class WorkspaceScannerTest {
 
     WorkspacePaths.requireWithinRoot(file, equivalentRoot);
     var snapshot =
-        new WorkspaceScanner(100, 100, 1000, 60)
+        new WorkspaceScanner(100, 100, 100, 1000, 60)
             .scan(equivalentRoot, new Options(false, false, false));
     assertEquals(1, snapshot.files().size());
     assertEquals("Allowed.java", snapshot.files().getFirst().relativePath());
@@ -130,7 +162,8 @@ class WorkspaceScannerTest {
     assertEquals(allowed.toRealPath(), shortRoot.toRealPath());
     WorkspacePaths.requireWithinRoot(shortRoot, shortRoot);
     var snapshot =
-        new WorkspaceScanner(100, 100, 1000, 60).scan(shortRoot, new Options(false, false, false));
+        new WorkspaceScanner(100, 100, 100, 1000, 60)
+            .scan(shortRoot, new Options(false, false, false));
     assertEquals(1, snapshot.files().size());
     assertEquals("Allowed.java", snapshot.files().getFirst().relativePath());
   }
@@ -155,7 +188,8 @@ class WorkspaceScannerTest {
           java.io.IOException.class,
           () -> WorkspacePaths.validateRoot(junction.toUri().toString()));
       var snapshot =
-          new WorkspaceScanner(100, 100, 1000, 60).scan(allowed, new Options(false, false, false));
+          new WorkspaceScanner(100, 100, 100, 1000, 60)
+              .scan(allowed, new Options(false, false, false));
       assertEquals(1, snapshot.files().size());
       assertEquals("Allowed.java", snapshot.files().getFirst().relativePath());
     } finally {
