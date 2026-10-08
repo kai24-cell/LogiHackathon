@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+.tools/
+.cache/
+*.vsix
+*.log
+.env*
+!.env.example
+runtime.json
+*credentials*.json
+*service-account*.json
+*.pem
+*.key
+backend/src/main/resources/static/
+!backend/src/main/resources/static/.gitkeep

@@ -1,0 +1,20 @@
+{"version":"0.2.0","configurations":[
+        {
+            "type": "java",
+            "name": "Application",
+            "request": "launch",
+            "mainClass": "jp.cheapreview.Application",
+            "projectName": "cheapreview"
+        },
+        {
+            "name": "CheapReview Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/extension"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/extension/dist/**/*.js"
+            ]
+        }
+    ]}
