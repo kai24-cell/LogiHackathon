@@ -188,6 +188,9 @@ class BudgetPreviewServiceTest {
     Files.writeString(root.resolve("A.java"), "class A {}");
     var capture = capture(false);
     var ids = List.of(id(capture, "A.java"));
+    // 設計の暫定範囲は両端を含む。予算内に収まるかどうかの判定とは分けて確認する。
+    for (long budget : new long[] {1024, 100000})
+      service.preview(capture, request(capture, ids, budget));
     for (long budget : new long[] {-1, 0, 1023, 100001, Long.MAX_VALUE})
       assertThrows(
           ResponseStatusException.class,

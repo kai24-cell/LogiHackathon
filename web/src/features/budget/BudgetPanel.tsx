@@ -157,7 +157,7 @@ export function BudgetPanel({
         入力予算はtokensの上限です。概算ちょうどでは不足し、安全余裕が必要です。費用の上限を保証しません。APIキー不要・外部API呼出なし。
       </p>
       <label>
-        入力予算（tokens）
+        入力トークン予算（tokens）
         <input
           type="number"
           min={1024}

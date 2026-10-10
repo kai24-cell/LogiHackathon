@@ -77,6 +77,8 @@ describe("budget preview state", () => {
   });
   it("rejects invalid integer budgets, blank questions and missing primary selections", () => {
     expect(validInput(input)).toBe(true);
+    for (const amount of [1024, 100000])
+      expect(validInput({ ...input, inputBudgetTokens: amount })).toBe(true);
     for (const amount of [-1, 0, 1023, 1024.5, Infinity, NaN, 100001])
       expect(validInput({ ...input, inputBudgetTokens: amount })).toBe(false);
     expect(validInput({ ...input, question: "　 \n" })).toBe(false);
