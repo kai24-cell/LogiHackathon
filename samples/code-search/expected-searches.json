@@ -1,0 +1,16 @@
+[
+  {
+    "question": "注文を保存する処理を確認したい",
+    "mode": "SERVICE_REVIEW",
+    "selected": ["src/main/java/demo/OrderController.java"],
+    "expectedTopThree": ["src/main/java/demo/OrderService.java", "src/main/java/demo/OrderRepository.java"],
+    "reason": "ControllerがService.createを呼び、ServiceがRepository.saveへ保存を委譲する。MailServiceはこの経路にない。"
+  },
+  {
+    "question": "認証と認可の構成を確認したい",
+    "mode": "AUTH_ANALYSIS",
+    "selected": [],
+    "expectedTopThree": ["src/main/java/demo/SecurityConfig.java"],
+    "reason": "EnableWebSecurityの付いたSecurityConfigが認証・認可設定を担当する。注文保存やメール配信は担当しない。"
+  }
+]

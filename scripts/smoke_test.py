@@ -98,7 +98,23 @@ def main():
             assert all(file['parseStatus'] == 'PARSED' for file in analysis['files'])
             assert all(file['types'] for file in analysis['files'])
             assert 'root' not in analysis
-        print('PASS: packaged Web, health, token, bridge claim, folder result, scan, test option, Java analysis')
+            search = call(
+                '/api/v1/workspaces/' + workspace_id + '/snapshots/'
+                + snapshot['snapshotId'] + '/code-search', {
+                    'question': 'OrderServiceの処理を確認したい',
+                    'selectedFileIds': [snapshot['files'][0]['fileId']],
+                    'mode': 'SERVICE_REVIEW',
+                }
+            )
+            assert search['snapshotId'] == snapshot['snapshotId']
+            assert len(search['candidates']) == expected_count
+            assert any(candidate['primarySelected'] for candidate in search['candidates'])
+            for candidate in search['candidates']:
+                score = candidate['score']
+                assert abs(score['total'] - sum(score[key] for key in (
+                    'cosineContribution', 'dependencyContribution', 'roleContribution'
+                ))) < 1e-12
+        print('PASS: packaged Web, health, token, bridge claim, folder result, scan, test option, Java analysis, code search')
     finally:
         process.terminate()
         try:

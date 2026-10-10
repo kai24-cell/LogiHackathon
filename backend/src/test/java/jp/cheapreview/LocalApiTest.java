@@ -172,6 +172,42 @@ class LocalApiTest {
         .andExpect(status().isConflict());
     mvc.perform(get(analysisPath).header("Host", "127.0.0.1:8765"))
         .andExpect(status().isUnauthorized());
+
+    String fileId =
+        mapper.readTree(listing.getResponse().getContentAsString()).at("/files/0/fileId").asText();
+    String searchPath =
+        "/api/v1/workspaces/" + workspaceId + "/snapshots/" + snapshotId + "/code-search";
+    String searchRequest =
+        mapper.writeValueAsString(
+            Map.of(
+                "question",
+                "Orderの処理を確認したい",
+                "selectedFileIds",
+                java.util.List.of(fileId),
+                "mode",
+                "CLASS_EXPLAIN"));
+    mvc.perform(
+            authenticated(post(searchPath)).contentType("application/json").content(searchRequest))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.snapshotId").value(snapshotId))
+        .andExpect(jsonPath("$.candidates[0].primarySelected").value(true))
+        .andExpect(jsonPath("$.candidates[0].score.dependency").value(1.0));
+    mvc.perform(
+            post(searchPath)
+                .header("Host", "127.0.0.1:8765")
+                .contentType("application/json")
+                .content(searchRequest))
+        .andExpect(status().isUnauthorized());
+    mvc.perform(
+            authenticated(post("/api/v1/workspaces/" + workspaceId + "/snapshots/old/code-search"))
+                .contentType("application/json")
+                .content(searchRequest))
+        .andExpect(status().isConflict());
+    mvc.perform(
+            authenticated(post(searchPath))
+                .contentType("application/json")
+                .content("{\"question\":\" \",\"selectedFileIds\":[],\"mode\":\"CLASS_EXPLAIN\"}"))
+        .andExpect(status().isBadRequest());
   }
 
   private MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request) {
