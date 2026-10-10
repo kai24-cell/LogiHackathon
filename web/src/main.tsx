@@ -51,7 +51,9 @@ function App() {
             ? `VS Code接続済み · ${status.windowId}`
             : "VS Code未接続"}
         </p>
-        <p>生成・翻訳は次の実装段階です。外部APIは呼び出しません。</p>
+        <p>
+          Gemini生成は明示的な設定・送信操作で実行します。翻訳は後続段階です。
+        </p>
       </section>
       <section>
         <h2>ワークスペース</h2>

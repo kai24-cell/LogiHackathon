@@ -10,6 +10,7 @@ import {
   validationIsCurrent,
 } from "./previewState";
 import type { PreviewInput } from "./previewState";
+import { GenerationPanel } from "../generation/GenerationPanel";
 
 const PREVIEW_DELAY_MS = 300;
 
@@ -91,11 +92,16 @@ export function BudgetPanel({
             setNow(Date.now());
           }
         })
-        .catch(() => {
+        .catch((failure: unknown) => {
           if (!cancelled) {
             setCompleted(undefined);
             setError(
-              "概算を取得できません。接続・予算・モデル設定・主選択・targetを確認し、必要なら再走査してください。",
+              failure instanceof Error &&
+                ["SECRET_REQUIRES_REVIEW", "SECRET_IN_QUESTION"].includes(
+                  failure.message,
+                )
+                ? "質問または主選択コードに秘密情報の疑いがあります。原質問は改変せず送信を停止しました。認証情報を除いて再走査・再入力してください。"
+                : "概算を取得できません。接続・予算・モデル設定・主選択・targetを確認し、必要なら再走査してください。",
             );
           }
         });
@@ -230,6 +236,7 @@ export function BudgetPanel({
           予算と有効性を確認しました。外部APIへの送信は行っていません。
         </p>
       )}
+      <GenerationPanel input={input} preview={result} busy={busy} />
     </section>
   );
 }

@@ -1,0 +1,1 @@
+Review authentication entry points, filters, configuration, authorization and user lookup.

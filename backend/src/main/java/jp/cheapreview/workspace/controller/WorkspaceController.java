@@ -1,7 +1,6 @@
 package jp.cheapreview.workspace.controller;
 
 import jp.cheapreview.workspace.dto.WorkspaceDtos.Options;
-import jp.cheapreview.workspace.dto.WorkspaceDtos.ScanJob;
 import jp.cheapreview.workspace.dto.WorkspaceDtos.ScanStarted;
 import jp.cheapreview.workspace.dto.WorkspaceDtos.Snapshot;
 import jp.cheapreview.workspace.service.WorkspaceService;
@@ -27,11 +26,6 @@ public class WorkspaceController {
   @ResponseStatus(HttpStatus.ACCEPTED)
   public ScanStarted scan(@PathVariable String id, @RequestBody Options options) {
     return new ScanStarted(workspaces.startScan(id, options));
-  }
-
-  @GetMapping("/jobs/{id}")
-  public ScanJob job(@PathVariable String id) {
-    return workspaces.getJob(id);
   }
 
   @GetMapping("/workspaces/{id}/files")

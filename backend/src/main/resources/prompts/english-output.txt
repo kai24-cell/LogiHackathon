@@ -1,0 +1,1 @@
+Answer in English. Return only JSON matching the provided schema. Preserve code, identifiers, file paths and reference IDs exactly. If evidence is insufficient, state the limitation.
