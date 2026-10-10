@@ -26,13 +26,21 @@ export function CodeSearchPanel({
   selected,
   busy,
   onSearch,
+  onInputChange,
+  question: suppliedQuestion,
+  mode: suppliedMode,
 }: {
   selected: ReadonlySet<string>;
   busy: boolean;
   onSearch: (request: SearchRequest) => Promise<CodeSearchResult>;
+  onInputChange?: (question: string, mode: SearchMode) => void;
+  question?: string;
+  mode?: SearchMode;
 }) {
-  const [question, setQuestion] = useState("");
-  const [mode, setMode] = useState<SearchMode>("SERVICE_REVIEW");
+  const [localQuestion, setQuestion] = useState("");
+  const [localMode, setMode] = useState<SearchMode>("SERVICE_REVIEW");
+  const question = suppliedQuestion ?? localQuestion;
+  const mode = suppliedMode ?? localMode;
   const [completed, setCompleted] = useState<{
     request: SearchRequest;
     result: CodeSearchResult;
@@ -70,7 +78,10 @@ export function CodeSearchPanel({
         質問
         <textarea
           value={question}
-          onChange={(event) => setQuestion(event.target.value)}
+          onChange={(event) => {
+            setQuestion(event.target.value);
+            onInputChange?.(event.target.value, mode);
+          }}
           maxLength={10000}
         />
       </label>
@@ -78,7 +89,11 @@ export function CodeSearchPanel({
         検索観点
         <select
           value={mode}
-          onChange={(event) => setMode(event.target.value as SearchMode)}
+          onChange={(event) => {
+            const next = event.target.value as SearchMode;
+            setMode(next);
+            onInputChange?.(question, next);
+          }}
         >
           {(Object.keys(modeLabels) as SearchMode[]).map((key) => (
             <option value={key} key={key}>

@@ -1,4 +1,7 @@
 import { createRoot } from "react-dom/client";
+import { useCallback, useState } from "react";
+import { BudgetPanel } from "./features/budget/BudgetPanel";
+import type { SearchMode } from "./types/search";
 import { useWorkspace } from "./features/workspace/useWorkspace";
 import { AnalysisResult } from "./features/analysis/AnalysisResult";
 import { CodeSearchPanel } from "./features/search/CodeSearchPanel";
@@ -11,6 +14,14 @@ import {
 import "./style.css";
 
 function App() {
+  const [searchInput, setSearchInput] = useState<{
+    question: string;
+    mode: SearchMode;
+  }>({ question: "", mode: "SERVICE_REVIEW" });
+  const onSearchInput = useCallback(
+    (question: string, mode: SearchMode) => setSearchInput({ question, mode }),
+    [],
+  );
   const {
     status,
     message,
@@ -120,17 +131,30 @@ function App() {
       </section>
       {analysis && <AnalysisResult result={analysis} />}
       {workspace && snapshot && (
-        <CodeSearchPanel
-          key={snapshot.snapshotId}
-          selected={selected}
-          busy={busy}
-          onSearch={(request) =>
-            api<CodeSearchResult>(
-              `/workspaces/${workspace.id}/snapshots/${snapshot.snapshotId}/code-search`,
-              request,
-            )
-          }
-        />
+        <div key={snapshot.snapshotId}>
+          <CodeSearchPanel
+            key={snapshot.snapshotId}
+            selected={selected}
+            busy={busy}
+            onInputChange={onSearchInput}
+            question={searchInput.question}
+            mode={searchInput.mode}
+            onSearch={(request) =>
+              api<CodeSearchResult>(
+                `/workspaces/${workspace.id}/snapshots/${snapshot.snapshotId}/code-search`,
+                request,
+              )
+            }
+          />
+          <BudgetPanel
+            workspaceId={workspace.id}
+            snapshotId={snapshot.snapshotId}
+            question={searchInput.question}
+            mode={searchInput.mode}
+            selected={selected}
+            busy={busy}
+          />
+        </div>
       )}
       <details>
         <summary>拡張の導入と接続</summary>

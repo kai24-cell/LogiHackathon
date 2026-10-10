@@ -175,6 +175,7 @@ class LocalApiTest {
 
     String fileId =
         mapper.readTree(listing.getResponse().getContentAsString()).at("/files/0/fileId").asText();
+    verifyBudgetPreview(workspaceId, snapshotId, fileId);
     String searchPath =
         "/api/v1/workspaces/" + workspaceId + "/snapshots/" + snapshotId + "/code-search";
     String searchRequest =
@@ -207,6 +208,70 @@ class LocalApiTest {
             authenticated(post(searchPath))
                 .contentType("application/json")
                 .content("{\"question\":\" \",\"selectedFileIds\":[],\"mode\":\"CLASS_EXPLAIN\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  private void verifyBudgetPreview(String workspaceId, String snapshotId, String fileId)
+      throws Exception {
+    var body = new java.util.LinkedHashMap<String, Object>();
+    body.put("workspaceId", workspaceId);
+    body.put("snapshotId", snapshotId);
+    body.put("question", "Orderの処理を確認したい");
+    body.put("mode", "SERVICE_REVIEW");
+    body.put("selectedFileIds", java.util.List.of(fileId));
+    body.put("inputBudgetTokens", 8192);
+    body.put("modelId", "unknown-model");
+    body.put("revision", 1);
+    String path = "/api/v1/analysis/preview";
+    var preview =
+        mvc.perform(
+                authenticated(post(path))
+                    .contentType("application/json")
+                    .content(mapper.writeValueAsString(body)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.canExecute").value(true))
+            .andExpect(jsonPath("$.historyTokens").value(0))
+            .andExpect(jsonPath("$.selectedChunks[0].mandatory").value(true))
+            .andReturn();
+    String previewId =
+        mapper.readTree(preview.getResponse().getContentAsString()).get("previewId").asText();
+    mvc.perform(
+            authenticated(post(path + "/" + previewId + "/validate"))
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isOk());
+    body.put("question", "別の質問");
+    mvc.perform(
+            authenticated(post(path + "/" + previewId + "/validate"))
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isConflict());
+    body.put("inputBudgetTokens", 8192.5);
+    mvc.perform(
+            authenticated(post(path))
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isBadRequest());
+    body.put("inputBudgetTokens", "8192");
+    mvc.perform(
+            authenticated(post(path))
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isBadRequest());
+    body.put("inputBudgetTokens", 8192);
+    body.put("snapshotId", "old");
+    mvc.perform(
+            authenticated(post(path))
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isConflict());
+    mvc.perform(
+            post(path)
+                .header("Host", "127.0.0.1:8765")
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(body)))
+        .andExpect(status().isUnauthorized());
+    mvc.perform(authenticated(post(path)).contentType("application/json").content("{}"))
         .andExpect(status().isBadRequest());
   }
 

@@ -114,7 +114,34 @@ def main():
                 assert abs(score['total'] - sum(score[key] for key in (
                     'cosineContribution', 'dependencyContribution', 'roleContribution'
                 ))) < 1e-12
-        print('PASS: packaged Web, health, token, bridge claim, folder result, scan, test option, Java analysis, code search')
+            budget_request = {
+                'workspaceId': workspace_id, 'snapshotId': snapshot['snapshotId'],
+                'question': 'OrderServiceの処理を確認したい',
+                'selectedFileIds': [snapshot['files'][0]['fileId']],
+                'mode': 'SERVICE_REVIEW', 'inputBudgetTokens': 8192,
+                'modelId': 'unknown-model', 'revision': 1,
+            }
+            preview = call('/api/v1/analysis/preview', budget_request)
+            assert preview['canExecute']
+            assert preview['estimatedCost'] is None
+            assert preview['minimumBudgetTokens'] == preview['counts']['tokens'] + preview['marginTokens']
+            assert preview['selectedChunks'][0]['mandatory']
+            call('/api/v1/analysis/preview/' + preview['previewId'] + '/validate', budget_request)
+            changed = dict(budget_request, question='別の質問')
+            try:
+                call('/api/v1/analysis/preview/' + preview['previewId'] + '/validate', changed)
+                raise AssertionError('Stale preview was accepted')
+            except HTTPError as error:
+                assert error.code == 409
+            insufficient = dict(budget_request, inputBudgetTokens=1024)
+            blocked = call('/api/v1/analysis/preview', insufficient)
+            assert not blocked['canExecute']
+            try:
+                call('/api/v1/analysis/preview/' + blocked['previewId'] + '/validate', insufficient)
+                raise AssertionError('Insufficient budget was accepted')
+            except HTTPError as error:
+                assert error.code == 422
+        print('PASS: packaged Web, bridge, scan, Java analysis, code search, budget preview, stale rejection, budget rejection')
     finally:
         process.terminate()
         try:
