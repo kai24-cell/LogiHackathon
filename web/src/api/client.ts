@@ -14,11 +14,15 @@ const token =
   typeof window === "undefined"
     ? ""
     : consumeToken(window.location, window.history);
-export async function api<T>(path: string, body?: unknown): Promise<T> {
+export async function api<T>(
+  path: string,
+  body?: unknown,
+  method?: "PUT" | "DELETE",
+): Promise<T> {
   if (!token && path !== "/health")
     throw new Error("VS CodeのCheapReview: Open Webから再接続してください。");
   const response = await fetch("/api/v1" + path, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: {
       "X-CheapReview-Token": token,
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
