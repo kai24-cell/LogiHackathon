@@ -1,5 +1,37 @@
 # Issue #4 Java解析の実装・検証
 
+## PR #12レビュー指摘の修正（2026-10-10）
+
+最新の修正・検証は本節を参照。以下の元の実装記録は初回実装時点の結果を保持している。
+
+| 指摘 | 修正前の結果 | 修正後の結果 |
+| --- | --- | --- |
+| 1：ラムダの同名引数 | `Consumer<External>`の`receiver -> receiver.ping()`が、フィールドAの`ping()`へのHEURISTIC辺になる | 有効なラムダ引数の型を確定できないため、辺を作らず`UNRESOLVED_RECEIVER`を記録 |
+| 1：for変数 | フィールドAとfor変数Bが同名のとき、for終了後もB.pingへのRESOLVED辺になる | for内はB.ping、終了後はA.pingへの辺になる。誤った解決結果を採用せず、Aの一意署名からHEURISTIC辺を作る |
+| 2：明示import | `import external.Target`が未取得でも、別ファイルの`p.Target`への型参照・呼出し辺がRESOLVEDになる | importの先へ置き換えられないため内部辺を作らず、型参照は`IMPORT_RESOLUTION_MISMATCH`、呼出しは`UNRESOLVED_RECEIVER`を記録 |
+| 3：ローカル型ID | 同一行のa()・b()内のLocalが同じ型ID・run()メソッドIDになる | 包含メソッド署名と同名宣言順序で別IDになる。同一メソッドの別ブロック内も区別し、改行・本文変更では維持 |
+| 4：Repository | `abstract class CustomRepository implements JpaRepository<Entity, Long>`のrolesが空 | Repository役割と`implements:JpaRepository`の根拠を保持。interfaceのextends判定も維持 |
+| 5：Security | 内部SecurityConfigだけのSecurityFilterChain参照で、外側ContainerにもSecurity役割が付く | 所属するSecurityConfigだけに付く。直接参照する通常の型の判定は維持 |
+
+### 実装・可読性
+
+- `LexicalScopes`へ宣言探索を分離し、内側の宣言を優先。for/foreach、ラムダ、catch、resource、ブロックの有効範囲を確認する。型が不明でもシャドーイングは有効なので、外側の変数へ進まない。
+- 名前レシーバの検証はRESOLVED/HEURISTIC共通。終了済みfor変数しかない参照も未解決にする。正当な継承メソッドとJDK呼出しは維持する。
+- 明示importの「存在」と内部索引の「候補あり」を区別。未取得のimportを同一packageやwildcard候補へ置き換えない。
+- ファイル解析、メンバー抽出、通常/compact constructor、DI抽出、推定呼出し、ソースルート推定を意味のある単位に分割。空行と短い日本語Javadoc・コメントで目的と制約を説明する。
+- 走査済みASTしか返さない閉じたキャッシュは維持し、「空の値」を返すことで未走査ファイルのディスク再読込を防ぐ理由を記載。
+- 未解決レシーバを識別する診断名を追加したため、既存テストの`other.ping()`の期待診断を`UNRESOLVED_RECEIVER`へ更新。曖昧な署名を未解決にする検証は維持。
+
+### 検証
+
+- Java 21 / Maven Wrapper：オフラインで`spotless:apply`、`spotless:check`、`verify`が成功。最終確認は`clean spotless:check verify`で生成物を再作成し、javac release 21でコンパイル。全41テスト（回帰16件を含む）が失敗・エラー・skipなし、Spring Boot jar生成。
+- Web / Node.js 24.13.0：`npm.cmd run format:check`、`lint`、`typecheck`、`test -- --run`、`build`が成功。12テスト。現在のweb/node_modulesにPrettierの実行ファイルがなかったため、最新ソース・設定を`.cache/ci-validation-20261008160539/web`へ反映し、既存依存で検証。追跡ファイルの内容一致を確認。
+- 拡張：同じ整形・Lint・型チェック・テスト・ビルドが成功。2テスト。
+- ローカル実行制限でJava依存jarとWebのesbuildが読み取りエラーになったため、必要な検証は制限外で再実行。外部依存のダウンロード・外部AI API通信は行っていない。
+- 回帰テストは`JavaAnalysisService`経由の再現例とSymbolSolverなしの推定処理を確認し、誤った辺の不在、未解決情報、正しい呼出し先、IDの一意性・安定性、役割の所属を検証する。
+- 実ブラウザ・実VS Codeでの操作、大規模プロジェクトの性能評価、未pushの修正に対するGitHub Actionsは未確認。
+- ユーザーの`.gitignore`・`.vscode/settings.json`の変更を保持。コミット・pushはしていない。
+
 検証日: 2026-10-09（Asia/Tokyo）
 ブランチ: `feature/issue04-java-analysis`
 開始点: 最新main `d9602001b14414ac9406f6976506535613b8335a`

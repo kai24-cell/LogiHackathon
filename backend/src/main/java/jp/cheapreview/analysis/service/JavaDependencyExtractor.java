@@ -1,14 +1,11 @@
 package jp.cheapreview.analysis.service;
 
 import com.github.javaparser.ast.Node;
-import com.github.javaparser.ast.body.CallableDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
-import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
-import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -16,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import jp.cheapreview.analysis.dto.JavaAnalysis;
 import jp.cheapreview.analysis.dto.JavaAnalysis.EdgeKind;
 import jp.cheapreview.analysis.dto.JavaAnalysis.Resolution;
@@ -43,59 +41,69 @@ final class JavaDependencyExtractor {
                     declaration.resolve().getQualifiedSignature(), ignored -> new ArrayList<>())
                 .add(method);
           } catch (RuntimeException exception) {
-            // Missing external types are normal. Calls may still have a unique syntax candidate.
+            // 外部依存の未取得は通常の状態。明示された型と署名だけで後から推定する。
           }
         }
       }
     }
   }
 
+  /** 固定済みASTから型参照・DI・呼出しを抽出し、解決不能な参照も記録する。 */
   Graph extract() {
     for (TypeContext owner : types) {
       owner.node().findAll(ClassOrInterfaceType.class).stream()
           .filter(node -> belongsTo(node, owner))
           .forEach(node -> typeReference(owner, node, EdgeKind.TYPE_REFERENCE));
-      owner.node().getFields().stream()
-          .filter(
-              field ->
-                  field.getAnnotations().stream()
-                      .anyMatch(
-                          a ->
-                              List.of("Autowired", "Inject", "Resource")
-                                  .contains(a.getName().getIdentifier())))
-          .forEach(
-              field ->
-                  field
-                      .getVariables()
-                      .forEach(
-                          variable ->
-                              variable
-                                  .getType()
-                                  .findAll(ClassOrInterfaceType.class)
-                                  .forEach(node -> typeReference(owner, node, EdgeKind.FIELD_DI))));
-      for (MethodContext method : owner.methods()) {
-        if (method.node() instanceof ConstructorDeclaration constructor
-            && (owner.node().getConstructors().size() == 1
-                || constructor.getAnnotations().stream()
-                    .anyMatch(
-                        a ->
-                            List.of("Autowired", "Inject")
-                                .contains(a.getName().getIdentifier())))) {
-          constructor
-              .getParameters()
-              .forEach(
-                  parameter ->
-                      parameter
-                          .getType()
-                          .findAll(ClassOrInterfaceType.class)
-                          .forEach(node -> typeReference(owner, node, EdgeKind.CONSTRUCTOR_DI)));
-        }
-      }
+
+      extractFieldInjection(owner);
+      extractConstructorInjection(owner);
+
       owner.node().findAll(MethodCallExpr.class).stream()
           .filter(node -> belongsTo(node, owner))
           .forEach(call -> methodCall(owner, call));
     }
+
     return new Graph(List.copyOf(edges), List.copyOf(unresolved));
+  }
+
+  private void extractFieldInjection(TypeContext owner) {
+    owner.node().getFields().stream()
+        .filter(
+            field ->
+                field.getAnnotations().stream()
+                    .anyMatch(
+                        a ->
+                            List.of("Autowired", "Inject", "Resource")
+                                .contains(a.getName().getIdentifier())))
+        .forEach(
+            field ->
+                field
+                    .getVariables()
+                    .forEach(
+                        variable ->
+                            variable
+                                .getType()
+                                .findAll(ClassOrInterfaceType.class)
+                                .forEach(node -> typeReference(owner, node, EdgeKind.FIELD_DI))));
+  }
+
+  private void extractConstructorInjection(TypeContext owner) {
+    for (MethodContext method : owner.methods()) {
+      if (method.node() instanceof ConstructorDeclaration constructor
+          && (owner.node().getConstructors().size() == 1
+              || constructor.getAnnotations().stream()
+                  .anyMatch(
+                      a -> List.of("Autowired", "Inject").contains(a.getName().getIdentifier())))) {
+        constructor
+            .getParameters()
+            .forEach(
+                parameter ->
+                    parameter
+                        .getType()
+                        .findAll(ClassOrInterfaceType.class)
+                        .forEach(node -> typeReference(owner, node, EdgeKind.CONSTRUCTOR_DI)));
+      }
+    }
   }
 
   private boolean belongsTo(Node node, TypeContext owner) {
@@ -110,16 +118,22 @@ final class JavaDependencyExtractor {
         .orElse(owner.info().typeId());
   }
 
+  /** 明示importと矛盾するSymbolSolverの結果を採用せず、未解決のまま残す。 */
   private void typeReference(TypeContext owner, ClassOrInterfaceType node, EdgeKind kind) {
     try {
       String name = node.resolve().asReferenceType().getQualifiedName();
+      if (!matchesExplicitImport(owner, node.getNameWithScope(), name)) {
+        missing(owner, node, kind, node.asString(), "IMPORT_RESOLUTION_MISMATCH");
+        return;
+      }
+
       List<TypeContext> candidates = byName.getOrDefault(name, List.of());
       if (candidates.size() == 1) {
         add(owner, node, candidates.getFirst().info().typeId(), kind, Resolution.RESOLVED);
       } else if (candidates.size() > 1) {
         missing(owner, node, kind, node.asString(), "AMBIGUOUS_TYPE");
       }
-      return; // A resolved JDK/external type is deliberately not a project graph edge.
+      return; // 解決済みのJDK・外部型は内部グラフの辺に含めない。
     } catch (RuntimeException exception) {
       List<TypeContext> candidates = syntaxTypes(owner, node.getNameWithScope());
       if (candidates.size() == 1) {
@@ -135,10 +149,31 @@ final class JavaDependencyExtractor {
     }
   }
 
+  /** 呼出し先を採用する前に、レシーバの宣言と解決結果の整合性を確認する。 */
   private void methodCall(TypeContext owner, MethodCallExpr call) {
+    var declaredReceiver = declaredReceiverTypes(owner, call);
+    if (declaredReceiver.isPresent() && declaredReceiver.orElseThrow().isEmpty()) {
+      // 宣言はあるが型が不明な場合、同名フィールドや別の内部型へ置き換えない。
+      missing(owner, call, EdgeKind.METHOD_CALL, call.getNameAsString(), "UNRESOLVED_RECEIVER");
+      return;
+    }
+
     try {
       var resolved = call.resolve();
       var candidates = resolvedMethods.getOrDefault(resolved.getQualifiedSignature(), List.of());
+      if (!byName.containsKey(resolved.declaringType().getQualifiedName())) {
+        // Objectからの継承を含む外部メソッドは、内部の辺として記録しない。
+        return;
+      }
+
+      if (declaredReceiver.isPresent()
+          && candidates.stream()
+              .noneMatch(method -> receiverContains(declaredReceiver.orElseThrow(), method))) {
+        // JavaParserは終了済みのfor変数を選ぶことがある。正しい宣言からのみ再推定する。
+        heuristicCall(owner, call, declaredReceiver.orElseThrow());
+        return;
+      }
+
       if (candidates.size() == 1) {
         add(
             owner,
@@ -156,9 +191,43 @@ final class JavaDependencyExtractor {
       }
       return;
     } catch (RuntimeException exception) {
-      // Only use a known receiver type and a unique matching signature, never imports alone.
+      // 解決失敗時も同名候補全体へ広げず、既知のレシーバに限定する。
     }
-    List<TypeContext> receivers = receiverTypes(owner, call);
+
+    heuristicCall(owner, call, declaredReceiver.orElseGet(() -> receiverTypes(owner, call)));
+  }
+
+  private boolean receiverContains(List<TypeContext> receivers, MethodContext method) {
+    return receivers.stream()
+        .anyMatch(
+            type ->
+                receiverHierarchy(type, new LinkedHashSet<>()).stream()
+                    .anyMatch(parent -> parent.methods().contains(method)));
+  }
+
+  /** 継承元の既知の宣言も照合し、正当な継承メソッドをスコープ不整合と誤認しない。 */
+  private List<TypeContext> receiverHierarchy(TypeContext type, Set<String> visited) {
+    if (!visited.add(type.info().typeId())) return List.of();
+
+    List<TypeContext> hierarchy = new ArrayList<>();
+    hierarchy.add(type);
+    if (type.node().isClassOrInterfaceDeclaration()) {
+      var declaration = type.node().asClassOrInterfaceDeclaration();
+      List<ClassOrInterfaceType> parents = new ArrayList<>(declaration.getExtendedTypes());
+      parents.addAll(declaration.getImplementedTypes());
+      for (var parent : parents) {
+        var candidates = syntaxTypes(type, parent.getNameWithScope());
+        if (candidates.size() == 1) {
+          hierarchy.addAll(receiverHierarchy(candidates.getFirst(), visited));
+        }
+      }
+    }
+
+    return hierarchy;
+  }
+
+  /** 同名署名の候補が一意の場合だけ推定辺にし、不明・曖昧な候補は記録する。 */
+  private void heuristicCall(TypeContext owner, MethodCallExpr call, List<TypeContext> receivers) {
     List<MethodContext> candidates =
         receivers.stream()
             .flatMap(type -> type.methods().stream())
@@ -188,7 +257,7 @@ final class JavaDependencyExtractor {
     if (parameters.size() != call.getArguments().size()) return false;
     for (int i = 0; i < parameters.size(); i++) {
       var parameter = parameters.get(i);
-      if (parameter.isVarArgs()) return false; // Uncertain varargs conversion stays unresolved.
+      if (parameter.isVarArgs()) return false; // 可変長引数の変換を確定できない場合は推定しない。
       String argumentType = expressionType(call.getArgument(i));
       if (argumentType == null) return false;
       if (argumentType.equals("null") && !parameter.getType().isPrimitiveType()) continue;
@@ -224,56 +293,89 @@ final class JavaDependencyExtractor {
       if (type.isReferenceType())
         return byName.getOrDefault(type.asReferenceType().getQualifiedName(), List.of());
     } catch (RuntimeException exception) {
-      // Recover an explicitly declared receiver type without guessing across the whole project.
+      // 型が明示されたnew式だけを構文から復元し、プロジェクト全体からは推測しない。
     }
     if (scope.isObjectCreationExpr())
       return syntaxTypes(owner, scope.asObjectCreationExpr().getType().getNameWithScope());
-    if (!scope.isNameExpr()) return List.of();
-    String name = scope.asNameExpr().getNameAsString();
-    Optional<CallableDeclaration<?>> callable =
-        call.findAncestor(CallableDeclaration.class).map(node -> (CallableDeclaration<?>) node);
-    if (callable.isPresent()) {
-      var locals =
-          callable.get().findAll(VariableDeclarator.class).stream()
-              .filter(variable -> variable.getNameAsString().equals(name))
-              .filter(
-                  variable ->
-                      JavaStructureExtractor.range(variable).beginLine()
-                          <= JavaStructureExtractor.range(call).beginLine())
-              .filter(
-                  variable ->
-                      variable
-                          .findAncestor(BlockStmt.class)
-                          .map(block -> block.isAncestorOf(call))
-                          .orElse(false))
-              .toList();
-      if (locals.size() == 1) return syntaxTypes(owner, locals.getFirst().getTypeAsString());
-      if (locals.size() > 1) return List.of();
-      var parameters =
-          callable.get().getParameters().stream()
-              .filter(p -> p.getNameAsString().equals(name))
-              .toList();
-      if (parameters.size() == 1)
-        return syntaxTypes(owner, parameters.getFirst().getTypeAsString());
-    }
-    var fields = owner.info().fields().stream().filter(field -> field.name().equals(name)).toList();
-    if (fields.size() == 1) return syntaxTypes(owner, fields.getFirst().type());
-    return List.of(); // Unresolved static receivers are not inferred from an import alone.
+    return List.of(); // 未解決のstaticレシーバをimportだけから推定しない。
   }
 
+  /** 有効な宣言を優先する。Optional内の空リストは型が不明で推定を禁止する状態。 */
+  private Optional<List<TypeContext>> declaredReceiverTypes(
+      TypeContext owner, MethodCallExpr call) {
+    if (call.getScope().isEmpty() || !call.getScope().orElseThrow().isNameExpr()) {
+      return Optional.empty();
+    }
+
+    var declaration = LexicalScopes.declaredType(call.getScope().orElseThrow().asNameExpr());
+    if (declaration.isEmpty()) {
+      // 宣言のない名前を終了済みの変数と誤認する解決結果も採用しない。
+      var classCandidates =
+          syntaxTypes(owner, call.getScope().orElseThrow().asNameExpr().getNameAsString());
+      if (!classCandidates.isEmpty()) return Optional.of(classCandidates);
+
+      try {
+        var resolved = call.resolve();
+        if (resolved.isStatic()
+            && !byName.containsKey(resolved.declaringType().getQualifiedName())) {
+          return Optional.empty();
+        }
+      } catch (RuntimeException exception) {
+        // 未解決のstatic呼出しも、importだけでは内部の辺にしない。
+      }
+
+      return Optional.of(List.of());
+    }
+
+    // 宣言の型そのものを使う。calculateResolvedTypeも同名変数を誤認し得るため使わない。
+    var type = declaration.orElseThrow();
+    var declarationOwner =
+        types.stream()
+            .filter(
+                context ->
+                    type.findAncestor(TypeDeclaration.class)
+                        .map(node -> node == context.node())
+                        .orElse(false))
+            .findFirst()
+            .orElse(owner);
+    var candidates = syntaxTypes(declarationOwner, type.asString());
+    if (!candidates.isEmpty()) return Optional.of(candidates);
+
+    try {
+      String resolvedName = type.resolve().asReferenceType().getQualifiedName();
+      String syntaxName =
+          type.isClassOrInterfaceType()
+              ? type.asClassOrInterfaceType().getNameWithScope()
+              : type.asString();
+      if (matchesExplicitImport(declarationOwner, syntaxName, resolvedName)
+          && !byName.containsKey(resolvedName)) {
+        // 解決済みのJDK型などは従来どおり外部参照として扱う。内部型への誤置換は通さない。
+        return Optional.empty();
+      }
+    } catch (RuntimeException exception) {
+      // 型が不明でも宣言によるシャドーイングは有効なので、外側の変数を選ばない。
+    }
+
+    return Optional.of(List.of());
+  }
+
+  /** 明示importを同一packageより優先し、未取得でも別の同名型へ進めない。 */
   private List<TypeContext> syntaxTypes(TypeContext owner, String name) {
     String rawName = name.replaceAll("<.*>", "").replace("[]", "");
-    if (byName.containsKey(rawName)
-        && (rawName.contains(".") || owner.unit().getPackageDeclaration().isEmpty()))
-      return byName.get(rawName);
+    if (byName.containsKey(rawName) && rawName.contains(".")) return byName.get(rawName);
     var explicitImports =
         owner.unit().getImports().stream()
             .filter(
                 i ->
                     !i.isStatic() && !i.isAsterisk() && i.getName().getIdentifier().equals(rawName))
-            .flatMap(i -> byName.getOrDefault(i.getNameAsString(), List.of()).stream())
             .toList();
-    if (!explicitImports.isEmpty()) return explicitImports;
+    if (!explicitImports.isEmpty()) {
+      // importの存在と索引の有無は別。依存を取得しない解析では空でもここで止める。
+      return explicitImports.stream()
+          .flatMap(i -> byName.getOrDefault(i.getNameAsString(), List.of()).stream())
+          .toList();
+    }
+
     String packageName =
         owner.unit().getPackageDeclaration().map(p -> p.getNameAsString() + ".").orElse("");
     var samePackage = byName.getOrDefault(packageName + rawName, List.of());
@@ -283,6 +385,14 @@ final class JavaDependencyExtractor {
         .flatMap(i -> byName.getOrDefault(i.getNameAsString() + "." + rawName, List.of()).stream())
         .distinct()
         .toList();
+  }
+
+  private boolean matchesExplicitImport(TypeContext owner, String name, String resolvedName) {
+    if (name.contains(".")) return true;
+
+    return owner.unit().getImports().stream()
+        .filter(i -> !i.isStatic() && !i.isAsterisk() && i.getName().getIdentifier().equals(name))
+        .allMatch(i -> i.getNameAsString().equals(resolvedName));
   }
 
   private void add(

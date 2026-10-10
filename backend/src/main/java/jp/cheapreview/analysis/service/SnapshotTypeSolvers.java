@@ -15,10 +15,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Supplies JavaParserTypeSolver with closed caches: a miss never reads another source file. */
+/** 走査済みASTだけを返す閉じたキャッシュで、解析中の追加ファイル読込を防ぐ。 */
 final class SnapshotTypeSolvers {
   private SnapshotTypeSolvers() {}
 
+  /** 保存済みpackageとパスからソースルートを推定し、ディスク再読込を禁止したsolverを登録する。 */
   static void add(
       CombinedTypeSolver solver, JavaParser parser, Path root, Map<String, CompilationUnit> units) {
     var files = new ClosedCache<Path, Optional<CompilationUnit>>(Optional.empty());
@@ -30,23 +31,12 @@ final class SnapshotTypeSolvers {
           Path path = root.resolve(relativePath).toAbsolutePath().normalize();
           files.put(path, Optional.of(unit));
           byDirectory.computeIfAbsent(path.getParent(), ignored -> new ArrayList<>()).add(unit);
-          Path sourceRoot = path.getParent();
-          String packageName =
-              unit.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("");
-          if (!packageName.isEmpty()) {
-            String[] names = packageName.split("\\.");
-            for (int i = names.length - 1; i >= 0; i--) {
-              if (sourceRoot.getFileName() == null
-                  || !sourceRoot.getFileName().toString().equals(names[i])) {
-                sourceRoot = root;
-                break;
-              }
-              sourceRoot = sourceRoot.getParent();
-            }
-          }
-          sourceRoots.add(sourceRoot.startsWith(root) ? sourceRoot : root);
+          sourceRoots.add(sourceRoot(root, path, unit));
         });
+
     byDirectory.forEach((path, values) -> directories.put(path, List.copyOf(values)));
+
+    // solverの標準キャッシュではmiss時にディスクへ進むため、空も必ずキャッシュから返す。
     for (Path sourceRoot : sourceRoots) {
       solver.add(
           new JavaParserTypeSolver(
@@ -56,6 +46,24 @@ final class SnapshotTypeSolvers {
               directories,
               new GuavaCache<>(CacheBuilder.newBuilder().build())));
     }
+  }
+
+  private static Path sourceRoot(Path root, Path path, CompilationUnit unit) {
+    Path sourceRoot = path.getParent();
+    String packageName = unit.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("");
+    if (!packageName.isEmpty()) {
+      String[] names = packageName.split("\\.");
+      for (int i = names.length - 1; i >= 0; i--) {
+        if (sourceRoot.getFileName() == null
+            || !sourceRoot.getFileName().toString().equals(names[i])) {
+          return root;
+        }
+        sourceRoot = sourceRoot.getParent();
+      }
+    }
+
+    // packageと配置が一致しない場合やroot外になる場合も、走査の許可範囲を広げない。
+    return sourceRoot.startsWith(root) ? sourceRoot : root;
   }
 
   private static final class ClosedCache<K, V> implements Cache<K, V> {
@@ -72,6 +80,7 @@ final class SnapshotTypeSolvers {
     }
 
     public Optional<V> get(K key) {
+      // Optional.empty()を返すとsolverがファイルを読む。未走査のキーも「空の値」を返す。
       return Optional.of(entries.getOrDefault(key, empty));
     }
 

@@ -20,6 +20,7 @@ final class SpringRoles {
 
   private SpringRoles() {}
 
+  /** 型自身のannotationと参照型から役割を判定する。内部型の根拠は混ぜない。 */
   static List<Role> classify(TypeDeclaration<?> type) {
     List<Role> roles = new ArrayList<>();
     type.getAnnotations()
@@ -42,7 +43,14 @@ final class SpringRoles {
                   .filter(a -> a.getName().getIdentifier().equals("Bean"))
                   .forEach(a -> roles.add(new Role("Configuration", "annotation:Bean", 0.8)));
             });
+    // 再帰検索は内部クラスにも入るため、根拠の所属型が一致する場合だけ採用する。
     type.findAll(ClassOrInterfaceType.class).stream()
+        .filter(
+            reference ->
+                reference
+                    .findAncestor(TypeDeclaration.class)
+                    .map(owner -> owner == type)
+                    .orElse(false))
         .filter(t -> t.getNameAsString().equals("SecurityFilterChain"))
         .findFirst()
         .ifPresent(t -> roles.add(new Role("Security", "type:SecurityFilterChain", 0.8)));
@@ -51,18 +59,31 @@ final class SpringRoles {
     } else if (type.getNameAsString().endsWith("Dto") || type.getNameAsString().endsWith("DTO")) {
       roles.add(new Role("DTO", "name:" + type.getNameAsString(), 0.3));
     }
-    if (type.isClassOrInterfaceDeclaration()) {
-      type.asClassOrInterfaceDeclaration().getExtendedTypes().stream()
-          .filter(
-              t ->
-                  List.of(
-                          "Repository",
-                          "CrudRepository",
-                          "JpaRepository",
-                          "PagingAndSortingRepository")
-                      .contains(t.getNameAsString()))
-          .forEach(t -> roles.add(new Role("Repository", "extends:" + t.getNameAsString(), 0.8)));
-    }
+    addRepositoryRoles(type, roles);
+
     return roles.stream().distinct().toList();
+  }
+
+  private static void addRepositoryRoles(TypeDeclaration<?> type, List<Role> roles) {
+    if (type.isClassOrInterfaceDeclaration()) {
+      var declaration = type.asClassOrInterfaceDeclaration();
+      addRepositoryParents(declaration.getExtendedTypes(), "extends:", roles);
+      addRepositoryParents(declaration.getImplementedTypes(), "implements:", roles);
+    }
+  }
+
+  private static void addRepositoryParents(
+      List<ClassOrInterfaceType> parents, String evidence, List<Role> roles) {
+    // 外部Spring依存は取得せず、宣言された型名を構文上の根拠として保持する。
+    parents.stream()
+        .filter(
+            t ->
+                List.of(
+                        "Repository",
+                        "CrudRepository",
+                        "JpaRepository",
+                        "PagingAndSortingRepository")
+                    .contains(t.getNameAsString()))
+        .forEach(t -> roles.add(new Role("Repository", evidence + t.getNameAsString(), 0.8)));
   }
 }

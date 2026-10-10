@@ -144,7 +144,7 @@ class JavaAnalysisServiceTest {
             .filter(e -> e.kind() == EdgeKind.METHOD_CALL && e.resolution() == Resolution.HEURISTIC)
             .count());
     assertTrue(graph.unresolved().stream().anyMatch(u -> u.reason().equals("AMBIGUOUS_METHOD")));
-    assertTrue(graph.unresolved().stream().anyMatch(u -> u.reason().equals("UNRESOLVED_METHOD")));
+    assertTrue(graph.unresolved().stream().anyMatch(u -> u.reason().equals("UNRESOLVED_RECEIVER")));
   }
 
   @Test
