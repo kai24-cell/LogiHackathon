@@ -16,9 +16,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import jp.cheapreview.workspace.dto.WorkspaceDtos.Options;
@@ -61,11 +63,15 @@ public class WorkspaceScanner {
   }
 
   public Snapshot scan(Path root, Options options) throws IOException {
+    return capture(root, options).snapshot();
+  }
+
+  public WorkspaceCapture capture(Path root, Options options) throws IOException {
     WorkspacePaths.requireWithinRoot(root, root);
     Path validatedRoot = WorkspacePaths.validateRoot(root.toUri().toString());
     ScanTraversal traversal = new ScanTraversal(validatedRoot, options);
     Files.walkFileTree(validatedRoot, traversal);
-    return traversal.snapshot();
+    return new WorkspaceCapture(validatedRoot, traversal.snapshot(), traversal.javaSources);
   }
 
   private boolean excludeDirectory(String name, Options options) {
@@ -110,6 +116,7 @@ public class WorkspaceScanner {
     private final Options options;
     private final List<SourceFile> files = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
+    private final Map<String, String> javaSources = new HashMap<>();
     private final long startedNanos = System.nanoTime();
     private long totalBytes;
     private long visitedEntries;
@@ -197,6 +204,9 @@ public class WorkspaceScanner {
         }
         WorkspacePaths.requireWithinRoot(path, root);
         StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes));
+        if (fileName(path).endsWith(".java")) {
+          javaSources.put(relativePath, new String(bytes, StandardCharsets.UTF_8));
+        }
         totalBytes += bytes.length;
         files.add(
             new SourceFile(

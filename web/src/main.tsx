@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useWorkspace } from "./features/workspace/useWorkspace";
+import { AnalysisResult } from "./features/analysis/AnalysisResult";
 import {
   formatScanWarning,
   scanOptionLabels,
@@ -13,6 +14,8 @@ function App() {
     busy,
     workspace,
     snapshot,
+    analysis,
+    analyzeJava,
     selected,
     setSelected,
     options,
@@ -47,6 +50,12 @@ function App() {
           </button>
           <button disabled={busy || !workspace} onClick={() => void rescan()}>
             再走査
+          </button>
+          <button
+            disabled={busy || !snapshot}
+            onClick={() => void analyzeJava()}
+          >
+            Java解析
           </button>
         </div>
         <fieldset disabled={busy}>
@@ -106,6 +115,7 @@ function App() {
           </>
         )}
       </section>
+      {analysis && <AnalysisResult result={analysis} />}
       <details>
         <summary>拡張の導入と接続</summary>
         <p>

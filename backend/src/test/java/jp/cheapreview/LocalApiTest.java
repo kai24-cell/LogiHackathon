@@ -151,10 +151,27 @@ class LocalApiTest {
               mvc.perform(authenticated(get("/api/v1/jobs/" + jobId)))
                   .andExpect(jsonPath("$.state").value("SUCCEEDED"));
             });
-    mvc.perform(authenticated(get("/api/v1/workspaces/" + workspaceId + "/files")))
+    var listing =
+        mvc.perform(authenticated(get("/api/v1/workspaces/" + workspaceId + "/files")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.files.length()").value(1))
+            .andExpect(jsonPath("$.files[0].relativePath").value("Order.java"))
+            .andReturn();
+    String snapshotId =
+        mapper.readTree(listing.getResponse().getContentAsString()).get("snapshotId").asText();
+    String analysisPath =
+        "/api/v1/workspaces/" + workspaceId + "/snapshots/" + snapshotId + "/java-analysis";
+    mvc.perform(authenticated(get(analysisPath)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.files.length()").value(1))
-        .andExpect(jsonPath("$.files[0].relativePath").value("Order.java"));
+        .andExpect(jsonPath("$.snapshotId").value(snapshotId))
+        .andExpect(jsonPath("$.files[0].parseStatus").value("PARSED"))
+        .andExpect(jsonPath("$.files[0].types[0].qualifiedName").value("Order"));
+    mvc.perform(
+            authenticated(
+                get("/api/v1/workspaces/" + workspaceId + "/snapshots/old/java-analysis")))
+        .andExpect(status().isConflict());
+    mvc.perform(get(analysisPath).header("Host", "127.0.0.1:8765"))
+        .andExpect(status().isUnauthorized());
   }
 
   private MockHttpServletRequestBuilder authenticated(MockHttpServletRequestBuilder request) {

@@ -89,7 +89,16 @@ def main():
             snapshot = call('/api/v1/workspaces/' + workspace_id + '/files')
             assert len(snapshot['files']) == expected_count
             assert not snapshot['warnings']
-        print('PASS: packaged Web, health, token, bridge claim, folder result, scan, test option')
+            analysis = call(
+                '/api/v1/workspaces/' + workspace_id + '/snapshots/'
+                + snapshot['snapshotId'] + '/java-analysis'
+            )
+            assert analysis['snapshotId'] == snapshot['snapshotId']
+            assert len(analysis['files']) == expected_count
+            assert all(file['parseStatus'] == 'PARSED' for file in analysis['files'])
+            assert all(file['types'] for file in analysis['files'])
+            assert 'root' not in analysis
+        print('PASS: packaged Web, health, token, bridge claim, folder result, scan, test option, Java analysis')
     finally:
         process.terminate()
         try:

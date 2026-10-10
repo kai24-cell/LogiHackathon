@@ -27,12 +27,12 @@ class WorkspaceServiceTest {
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     Snapshot snapshot = new Snapshot("snapshot", List.of(), List.of());
-    when(scanner.scan(any(), any()))
+    when(scanner.capture(any(), any()))
         .thenAnswer(
             invocation -> {
               entered.countDown();
               assertTrue(release.await(5, TimeUnit.SECONDS));
-              return snapshot;
+              return new WorkspaceCapture(root, snapshot, java.util.Map.of());
             });
     WorkspaceService service = new WorkspaceService(scanner, 20, 100, 2);
     try {
