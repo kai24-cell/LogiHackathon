@@ -1,6 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { useWorkspace } from "./features/workspace/useWorkspace";
 import { AnalysisResult } from "./features/analysis/AnalysisResult";
+import { CodeSearchPanel } from "./features/search/CodeSearchPanel";
+import { api } from "./api/client";
+import type { CodeSearchResult } from "./types/search";
 import {
   formatScanWarning,
   scanOptionLabels,
@@ -116,6 +119,19 @@ function App() {
         )}
       </section>
       {analysis && <AnalysisResult result={analysis} />}
+      {workspace && snapshot && (
+        <CodeSearchPanel
+          key={snapshot.snapshotId}
+          selected={selected}
+          busy={busy}
+          onSearch={(request) =>
+            api<CodeSearchResult>(
+              `/workspaces/${workspace.id}/snapshots/${snapshot.snapshotId}/code-search`,
+              request,
+            )
+          }
+        />
+      )}
       <details>
         <summary>拡張の導入と接続</summary>
         <p>
