@@ -72,3 +72,7 @@ Interactions APIとgenerateContentのエラー形式は異なるため、別API�
 ローカルキーを修正したという返信はまだなく、実APIの再実行は保留する。
 
 再レビューではP3の解消と追加エラー分類の安全性を確認し、新たな確実な不具合なし。最終jarのstub3ケースも成功した。
+
+Windows PowerShell 5.1のラッパー直接確認で、日本語を含むUTF-8 BOMなしスクリプトの構文エラーを検出した。
+verify_api.ps1をUTF-8 BOM付きに変更し、CIの固定生成3ケースもWindows PowerShellで実行して互換性を検証する。
+修正後にPS5.1のラッパー経由でnormal/invalid/timeoutの3ケース成功。reviewerもBOMとCI設定を確認し、追加指摘なし。

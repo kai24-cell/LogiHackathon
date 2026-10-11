@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Real,
     [switch]$AllowPaidApi,
     [ValidateSet('normal', 'invalid', 'timeout')][string]$Scenario = 'normal',
