@@ -4,6 +4,8 @@ Windowsのローカルブラウザで動くSpring Bootコード理解・レビ�
 今回の実装範囲は **Web表示 → VS Code拡張接続 → フォルダ選択 → ファイル走査 → Java解析 → 関連コード検索 → 概算・予算内のコード組み立て → Gemini英語回答** です。
 Gemini生成はキー設定後の明示的な送信操作で実APIを呼び出します。翻訳・会話TXTは後続段階の必須仕様として扱います。自動テストはstubを使用し、外部AI APIを呼び出しません。
 
+WindowsのZIP展開・VSIX導入・起動・サンプル操作・停止・梱包は[導入ガイド](docs/installation-guide.md)を参照してください。#10の先行整備であり、#14のデモ認証、#8翻訳、#9会話/TXTの完成を示すものではありません。
+
 ## 設計書
 
 [詳細設計](docs/cheapreview_detailed_design_version02.md)を[旧要件・基本設計](docs/cheapreview_design_spec_version02.md)より優先します。
@@ -11,7 +13,7 @@ Gemini生成はキー設定後の明示的な送信操作で実APIを呼び出�
 
 Word 2冊の本文・表・ヘッダー・フッターをMarkdownへ変換しています。
 再変換は `python scripts/docx_to_markdown.py`、全テキストの順序照合は `python scripts/verify_docx_markdown.py` です。
-Pythonは文書変換だけに必要で、アプリ実行には不要です。
+Pythonは文書変換と提出ZIPの安全検査に必要で、アプリ実行には不要です。
 
 ## 前提
 
@@ -183,7 +185,7 @@ Spring役割はannotation/typeの構文上の根拠と信頼度を付け、DTO�
 
 ## ZIP作成
 
-変更をレビューしてコミットし、build.ps1完了後に実行します。
+変更をレビューしてコミットし、クリーンな作業ツリーで実行します。package.ps1がbuild.ps1を毎回実行するため、事前の重複ビルドは不要です。JDK 21・Node.js・npm・Git・Python 3.10以上と、依存取得用のネットワークを用意してください。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
@@ -191,7 +193,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
 
 `dist/cheapreview-source.zip` にGit追跡ソースとjar・VSIXをまとめます。
 未追跡の利用者コード、node_modules、依存キャッシュ、runtime.jsonは含めません。
-Git管理対象に実キー・認証JSONを入れないでください。作成後にZIP内容を確認します。
+Git管理対象も危険パス・認証JSON・代表的な秘密形式を検査します。空欄.env.exampleだけ許可し、Word原本とエディタ設定は同梱しません。commitと収録一覧のdistribution-manifest.jsonを含めます。詳細と未確認の手動受入は[導入ガイド](docs/installation-guide.md)と[梱包検証記録](docs/issue10-validation.md)を参照してください。
 同梱jarの実行にはJava 21が必要で、Node.jsは再ビルド時だけ必要です。
 
 ## 関連コード検索

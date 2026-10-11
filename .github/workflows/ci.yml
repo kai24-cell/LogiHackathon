@@ -50,12 +50,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Test distribution safety checks without credentials
+        run: python -m unittest discover -s scripts -p "test_*distribution*.py"
+
       # Reuse the checked local pipeline. It uses npm ci, format:check, lint,
       # typecheck, test -- --run and build for both TypeScript packages, then
       # Maven Wrapper verify (including Spotless check) and VSIX packaging.
       # Do not call format or spotless:apply in CI.
+      - name: Seed obsolete generated files for the clean-build regression
+        run: python scripts/verify_distribution_clean.py seed
+
       - name: Check formatting, lint, types, tests and build jar and VSIX
         run: .\scripts\build.ps1
+
+      - name: Verify obsolete files are absent from jar and VSIX
+        run: python scripts/verify_distribution_clean.py check
 
       # Starts only our packaged application on 127.0.0.1, using a generated
       # connection token. No Gemini/Translation keys or credentials are needed.
