@@ -39,12 +39,16 @@ function Clear-GeneratedDirectory([string]$relativePath) {
 }
 function Run([string]$directory, [scriptblock]$command) {
     Push-Location (Join-Path $root $directory)
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
+        # PS5.1はnative stderrの警告もPowerShellエラーにする。失敗判定は終了コードで行う。
+        $ErrorActionPreference = 'Continue'
         & $command
         if ($LASTEXITCODE -ne 0) {
             throw "Build failed: $directory"
         }
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         Pop-Location
     }
 }

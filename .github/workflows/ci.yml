@@ -61,6 +61,7 @@ jobs:
         run: python scripts/verify_distribution_clean.py seed
 
       - name: Check formatting, lint, types, tests and build jar and VSIX
+        shell: powershell
         run: .\scripts\build.ps1
 
       - name: Verify obsolete files are absent from jar and VSIX

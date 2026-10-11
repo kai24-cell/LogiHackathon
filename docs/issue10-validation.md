@@ -44,6 +44,8 @@ Ruffは導入されていないため、追加インストール・ruff format�
 
 実API通信はこの作業で行っていない。#14の許可回数を消費していない。
 
+親の実梱包確認で、PowerShell 5.1がnpmのstderr警告を終了コード0でも例外扱いし、ビルドを停止する問題を確認した。Run内だけnative stderrを表示して続行し、非ゼロ終了コードで明示停止するよう修正した。公開warning fixtureとexit 3を使い、警告の続行・失敗時の停止・ErrorActionPreference復元を確認した。CIの通常ビルドもWindows PowerShell 5.1で実行する。
+
 前提PRの互換性確認：#14作業ブランチのtrackedファイルだけを`git archive`で検査し、178ファイルが選定・検査を通過した。.envやユーザー認証は読み込んでいない。verify_api.pyのfixture文字列を現在の検査は誤検出しなかった。前提PR合流後には、実jar/VSIX内部も同様に再確認する（未実施）。
 
 ## レビュー指摘P2への対応：古い生成物の残存
