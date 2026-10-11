@@ -27,12 +27,14 @@ public class GenerationSettings {
 
   /** 新しいキーをJSON本文で受け取り、旧設定参照を置換する。空キーの保存は認めない。 */
   public synchronized SettingsDtos.Status update(SettingsDtos.Update update) {
-    if (update == null
-        || update.modelId() == null
-        || !update.modelId().matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}")
-        || update.apiKey() == null
-        || !update.apiKey().matches("[a-zA-Z0-9_-]{8,256}"))
+    if (update == null)
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_SETTINGS");
+    if (update.modelId() == null || !update.modelId().matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}"))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_MODEL_ID");
+    if (update.apiKey() == null || !update.apiKey().matches("[a-zA-Z0-9_-]{8,256}"))
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_API_KEY");
+
+    // 検証完了前には既存設定を変更せず、例外にも入力値を含めない。
     modelId = update.modelId();
     key = update.apiKey();
     version = UUID.randomUUID().toString();

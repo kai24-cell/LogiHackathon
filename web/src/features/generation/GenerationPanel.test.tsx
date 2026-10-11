@@ -80,7 +80,10 @@ describe("Gemini generation controls", () => {
     );
     expect(html).toContain("料金が発生する可能性");
     expect(html).toContain('type="password"');
-    expect(html).toContain("キー未設定");
+    expect(html).toContain("キー設定状態を確認できません");
+    expect(html).not.toContain("キー未設定");
+    // 失敗後も既存キーが残る可能性があるため、状態不明でも明示解除は可能にする。
+    expect(html).toContain("<button>設定解除</button>");
     expect(html).toContain("今回は英語の構造化回答");
   });
   it("escapes answer code and uses trusted reference ranges with nullable API usage", () => {

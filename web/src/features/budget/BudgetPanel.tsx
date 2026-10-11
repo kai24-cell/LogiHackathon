@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorPresentation";
 import type { BudgetResult } from "../../types/budget";
 import type { SearchMode } from "../../types/search";
 import {
@@ -95,14 +96,7 @@ export function BudgetPanel({
         .catch((failure: unknown) => {
           if (!cancelled) {
             setCompleted(undefined);
-            setError(
-              failure instanceof Error &&
-                ["SECRET_REQUIRES_REVIEW", "SECRET_IN_QUESTION"].includes(
-                  failure.message,
-                )
-                ? "質問または主選択コードに秘密情報の疑いがあります。原質問は改変せず送信を停止しました。認証情報を除いて再走査・再入力してください。"
-                : "概算を取得できません。接続・予算・モデル設定・主選択・targetを確認し、必要なら再走査してください。",
-            );
+            setError("概算取得に失敗しました。" + apiErrorMessage(failure));
           }
         });
     }, PREVIEW_DELAY_MS);
@@ -137,7 +131,7 @@ export function BudgetPanel({
         )
       )
         setVerifiedKey(startedKey + result.previewId);
-    } catch {
+    } catch (failure) {
       if (
         validationIsCurrent(
           startedKey,
@@ -147,9 +141,7 @@ export function BudgetPanel({
         )
       ) {
         setCompleted(undefined);
-        setError(
-          "予算またはpreviewの有効性を確認できませんでした。入力を見直して概算を更新してください。",
-        );
+        setError("組み立て確認に失敗しました。" + apiErrorMessage(failure));
       }
     } finally {
       setChecking(false);
@@ -176,7 +168,7 @@ export function BudgetPanel({
       <label>
         モデルID（料金設定のキー）
         <input
-          type="password"
+          type="text"
           autoComplete="off"
           value={modelId}
           onChange={(event) => setModelId(event.target.value)}

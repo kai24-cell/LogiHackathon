@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { api, ApiFailure } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorPresentation";
 import {
   APP_VERSION,
   PROTOCOL_VERSION,
@@ -41,7 +42,11 @@ export function useConnection() {
       } catch (error) {
         if (!disposed) {
           setStatus(undefined);
-          setConnectionMessage(String(error));
+          setConnectionMessage(
+            error instanceof ApiFailure
+              ? apiErrorMessage(error)
+              : String(error),
+          );
         }
       }
       if (!disposed)

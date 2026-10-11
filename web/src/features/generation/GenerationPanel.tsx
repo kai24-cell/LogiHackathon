@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorPresentation";
 import type { BudgetResult } from "../../types/budget";
 import type { PreviewInput } from "../budget/previewState";
 import { inputKey } from "../budget/previewState";
@@ -63,6 +64,7 @@ export function GenerationPanel({
     undefined,
   );
   const sendingRef = useRef(false);
+  const settingsRequestVersion = useRef(0);
   const current = useRef({ input, preview, settings });
   current.current = { input, preview, settings };
   const running =
@@ -71,19 +73,21 @@ export function GenerationPanel({
 
   useEffect(() => {
     let cancelled = false;
+    const version = settingsRequestVersion.current;
     void Promise.all([
       api<GenerationSettings>("/settings"),
       api<{ jobId: string | null }>("/analysis/jobs/active"),
     ])
       .then(([value, active]) => {
         if (!cancelled) {
-          setSettings(value);
+          // 初期GETの遅い応答で、その後の設定成功・失敗の表示を上書きしない。
+          if (version === settingsRequestVersion.current) setSettings(value);
           if (active.jobId) setJobId(active.jobId);
         }
       })
-      .catch(() => {
-        if (!cancelled)
-          setError("設定状態を取得できません。Open Webで再接続してください。");
+      .catch((failure: unknown) => {
+        if (!cancelled && version === settingsRequestVersion.current)
+          setError("設定状態の取得に失敗しました。" + apiErrorMessage(failure));
       });
     return () => {
       cancelled = true;
@@ -119,6 +123,7 @@ export function GenerationPanel({
 
   async function configure(clear = false) {
     if (saving) return;
+    settingsRequestVersion.current += 1;
     setSaving(true);
     setError("");
     try {
@@ -130,9 +135,12 @@ export function GenerationPanel({
             "PUT",
           );
       setSettings(value);
-    } catch {
+    } catch (failure) {
+      // 通信結果が不明な場合も、最後の表示を現在の設定成功として扱わない。
+      setSettings(undefined);
       setError(
-        "設定できません。モデルIDとキーの入力形式・接続を確認してください。",
+        "設定操作に失敗しました。安全のため入力したキーは消去しました。" +
+          apiErrorMessage(failure),
       );
     } finally {
       setKey("");
@@ -218,15 +226,17 @@ export function GenerationPanel({
         現在のモデルIDとキーを設定
       </button>
       <button
-        disabled={saving || running || !settings?.configured}
+        disabled={saving || running || settings?.configured === false}
         onClick={() => void configure(true)}
       >
         設定解除
       </button>
       <p>
         {settings?.configured
-          ? "キー設定済み（再表示・保存なし）"
-          : "キー未設定"}
+          ? `キー設定済み（モデルID: ${settings.modelId}、Gemini疎通は未確認）`
+          : settings
+            ? "キー未設定"
+            : "キー設定状態を確認できません（未設定とは限りません）"}
       </p>
       {settings?.configured && settings.modelId !== input.modelId && (
         <p>

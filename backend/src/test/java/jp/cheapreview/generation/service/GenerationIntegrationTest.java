@@ -43,7 +43,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -52,7 +54,9 @@ import org.springframework.web.server.ResponseStatusException;
 @SpringBootTest(
     properties =
         "cheapreview.connection-token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(print = MockMvcPrint.NONE)
+// ケース間のworkspace・job・キー設定を持ち越さず、製品の保持上限も変更しない。
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class GenerationIntegrationTest {
   @Autowired MockMvc mvc;
   private static final String KEY = "test-only-key-000";
@@ -399,5 +403,93 @@ class GenerationIntegrationTest {
     var job = completed(generation.start(request(input(Mode.SERVICE_REVIEW, 8192))).jobId());
     assertEquals("[REDACTED]", job.result().answerEnglish().summary());
     assertFalse(mapper.writeValueAsString(job).contains(KEY));
+  }
+
+  @Test
+  void settingsValidationIdentifiesFieldWithoutChangingPreviousConfiguration() throws Exception {
+    var before = settings.status();
+    String token = "a".repeat(64);
+    for (var invalid :
+        List.of(
+            new SettingsDtos.Update("models/fixture-model", KEY),
+            new SettingsDtos.Update("fixture-model", "invalid key with spaces"))) {
+      String code =
+          invalid.modelId().startsWith("models/") ? "INVALID_MODEL_ID" : "INVALID_API_KEY";
+      var response =
+          mvc.perform(
+                  put("/api/v1/settings")
+                      .header("Host", "127.0.0.1:8765")
+                      .header("Origin", "http://127.0.0.1:8765")
+                      .header("X-CheapReview-Token", token)
+                      .contentType("application/json")
+                      .content(mapper.writeValueAsString(invalid)))
+              .andExpect(status().isBadRequest())
+              .andExpect(jsonPath("$.code").value(code))
+              .andReturn()
+              .getResponse()
+              .getContentAsString();
+      assertFalse(response.contains(KEY));
+      assertFalse(response.contains(invalid.apiKey()));
+      assertEquals(before, settings.status());
+    }
+    verifyNoInteractions(provider);
+  }
+
+  @Test
+  void settingsAndPreviewRejectMissingConnectionAndInvalidOriginBeforeInputValidation()
+      throws Exception {
+    for (String path : List.of("/api/v1/settings", "/api/v1/analysis/preview")) {
+      for (boolean wrongOrigin : List.of(false, true)) {
+        var request = path.endsWith("settings") ? put(path) : post(path);
+        request
+            .header("Host", "127.0.0.1:8765")
+            .header("Origin", wrongOrigin ? "http://localhost:5173" : "http://127.0.0.1:8765")
+            .contentType("application/json")
+            .content("{}");
+        mvc.perform(request)
+            .andExpect(status().is(wrongOrigin ? 403 : 401))
+            .andExpect(
+                jsonPath("$.code").value(wrongOrigin ? "INVALID_ORIGIN" : "INVALID_CONNECTION"));
+      }
+      var request = path.endsWith("settings") ? put(path) : post(path);
+      mvc.perform(
+              request
+                  .header("Host", "127.0.0.1:8765")
+                  .header("X-CheapReview-Token", "b".repeat(64))
+                  .contentType("application/json")
+                  .content("{}"))
+          .andExpect(status().isUnauthorized())
+          .andExpect(jsonPath("$.code").value("INVALID_CONNECTION"));
+    }
+    verifyNoInteractions(provider);
+  }
+
+  @Test
+  void authenticatedSettingsAndPreviewSucceedWithoutCallingGemini() throws Exception {
+    String token = "a".repeat(64);
+    mvc.perform(
+            put("/api/v1/settings")
+                .header("Host", "127.0.0.1:8765")
+                .header("X-CheapReview-Token", token)
+                .contentType("application/json")
+                .content(mapper.writeValueAsString(new SettingsDtos.Update("fixture-model", KEY))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.configured").value(true))
+        .andExpect(jsonPath("$.modelId").value("fixture-model"))
+        .andExpect(jsonPath("$.apiKey").doesNotExist());
+
+    for (long budget : List.of(8192L, 100001L)) {
+      var response =
+          mvc.perform(
+                  post("/api/v1/analysis/preview")
+                      .header("Host", "127.0.0.1:8765")
+                      .header("X-CheapReview-Token", token)
+                      .contentType("application/json")
+                      .content(mapper.writeValueAsString(input(Mode.SERVICE_REVIEW, budget))))
+              .andExpect(status().is(budget == 8192 ? 200 : 400));
+      if (budget == 8192) response.andExpect(jsonPath("$.canExecute").value(true));
+      else response.andExpect(jsonPath("$.code").value("INVALID_PREVIEW_REQUEST"));
+    }
+    verifyNoInteractions(provider);
   }
 }
