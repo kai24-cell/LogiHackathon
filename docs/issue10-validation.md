@@ -32,7 +32,9 @@ Ruffは導入されていないため、追加インストール・ruff format�
 
 ## 未確認・手動受入チェック
 
-実build.ps1による現在commitのjar/VSIX作成と実提出ZIPの生成は未実施。worktreeが未コミット状態のためpackage.ps1の通常経路は意図的に停止する。コミット後に必要な環境でpackage.ps1を一度実行する。
+初回レビュー時点では未コミットのため実梱包は未実施だった。その後、親が`b0894e3`でWindows PowerShell 5.1のpackage.ps1を実行し成功した。既存のJDK 21・Maven/npmキャッシュを使い、実APIを呼ばずにWebの整形・Lint・型チェック・30テスト・ビルド、JavaのSpotless・clean verify・104テスト、拡張の整形・Lint・型チェック・2テスト・ビルド・VSIX生成を確認した。
+
+実jar/VSIXの安全検査、最終ZIP生成、manifest、公開canary4件の生成先・jar/VSIXからの除去も成功。生成ZIPのsourceCommitは`b0894e3`で、この後追記した検証記録を含むcommitのZIPを作成したとは主張しない。最新CIの結果はPRに記録する。VSIXの既存repository/LICENSE警告は残るが梱包は成功した。
 
 - [ ] 新しいZIPを別フォルダに展開し、manifestのcommitとjar/VSIXを確認。
 - [ ] 実VS CodeでVSIXを導入し、Open Webから接続。
@@ -54,4 +56,4 @@ Ruffは導入されていないため、追加インストール・ruff format�
 
 Vite設定はoutDir/emptyOutDirを上書きしていないため、標準のproject内dist初期化を使用する。これだけを成功の根拠とせず、`verify_distribution_clean.py seed`→通常のbuild.ps1→`verify_distribution_clean.py check`を既存CIへ追加する。canaryはweb/dist、Spring static、Maven target/classes、extension/distに置き、生成先と最終jar/VSIXから消えることを検査する。追加依存・追加のnpm ciは不要。
 
-追加fixtureテスト3件成功（合計12件）。生成先のみのseed、既存canary非上書き、生成先/成果物内残存の拒否とclean判定を検証した。PowerShell 5.1でcleanup関数を偽のworkspaceへ適用し、static/extensionのcanary削除と許可リスト外拒否を確認した。実ビルドを通したcanary除去は親担当/CIで実施予定で、現時点では未確認。
+追加fixtureテスト3件成功（合計12件）。生成先のみのseed、既存canary非上書き、生成先/成果物内残存の拒否とclean判定を検証した。PowerShell 5.1でcleanup関数を偽のworkspaceへ適用し、static/extensionのcanary削除と許可リスト外拒否を確認した。親の実梱包とCIの通常ビルドでもcanary除去を確認済み。
