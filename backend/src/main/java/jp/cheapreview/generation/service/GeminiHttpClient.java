@@ -18,10 +18,15 @@ import jp.cheapreview.budget.service.PromptMaterializer;
 import jp.cheapreview.generation.dto.GenerationDtos.Usage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /** 固定HTTPS宛先へ1回だけ送信する。認証はヘッダー、redirectと自動再試行は無効。 */
 @Component
+@ConditionalOnProperty(
+    name = "cheapreview.generation.provider",
+    havingValue = "real",
+    matchIfMissing = true)
 public class GeminiHttpClient implements GeminiClient {
   private static final int MAX_RESPONSE_BYTES = 1_048_576;
   private final ObjectMapper mapper;
@@ -122,10 +127,22 @@ public class GeminiHttpClient implements GeminiClient {
         throw new GenerationFailure("GEMINI_UNAVAILABLE");
       }
       int status = response.statusCode();
-      if (status == 401 || status == 403) throw new GenerationFailure("GEMINI_AUTH_FAILED");
-      if (status == 429) throw new GenerationFailure("GEMINI_RATE_LIMITED");
-      if (status == 400 || status == 404) throw new GenerationFailure("MODEL_UNSUPPORTED");
-      if (status < 200 || status >= 300) throw new GenerationFailure("GEMINI_UNAVAILABLE");
+      if (status < 200 || status >= 300) {
+        // 任意のエラーメッセージは残さない。JSONでない失敗でもHTTP数値を保持する。
+        JsonNode error;
+        try {
+          error = mapper.readTree(response.body());
+        } catch (Exception exception) {
+          error = mapper.createObjectNode();
+        }
+        if (error == null) error = mapper.createObjectNode();
+        throw GeminiErrorClassifier.classify(
+            status,
+            error,
+            body == null
+                ? jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO
+                : jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE);
+      }
       return mapper.readTree(response.body());
     } catch (GenerationFailure failure) {
       throw failure;

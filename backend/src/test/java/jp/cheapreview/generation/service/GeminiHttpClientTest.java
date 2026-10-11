@@ -130,9 +130,28 @@ class GeminiHttpClientTest {
   void generationPostFailureIsNotRetried() {
     postStatus = 429;
     response = "fake-only-key provider-error";
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("GEMINI_RATE_LIMITED", failure.getMessage());
+    assertEquals(429, failure.details().httpStatus());
     assertEquals(
-        "GEMINI_RATE_LIMITED", assertThrows(GenerationFailure.class, this::generate).getMessage());
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
     assertEquals(1, posts.get());
+  }
+
+  @Test
+  void malformedMetadataErrorStillReportsStatusAndNeverGenerates() {
+    status = 404;
+    metadata = "fake-only-key not-json";
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("MODEL_NOT_FOUND", failure.getMessage());
+    assertEquals(404, failure.details().httpStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStatus.UNKNOWN,
+        failure.details().apiStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO,
+        failure.details().stage());
+    assertEquals(0, posts.get());
   }
 
   @Test

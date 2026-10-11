@@ -4,6 +4,8 @@ import {
   EnglishResult,
   GenerationPanel,
   generationError,
+  sourceLabel,
+  generationDiagnostics,
 } from "./GenerationPanel";
 import { canGenerate, type GenerationJob } from "../../types/generation";
 import type { PreviewInput } from "../budget/previewState";
@@ -27,6 +29,34 @@ const preview = {
 } as BudgetResult;
 afterEach(() => vi.useRealTimers());
 describe("Gemini generation controls", () => {
+  it("explains model and quota errors without echoing unknown diagnostics", () => {
+    expect(generationError("MODEL_NOT_FOUND")).toContain("廃止");
+    expect(generationError("MODEL_NOT_FOUND")).toContain("断定できません");
+    expect(generationError("GEMINI_QUOTA_EXCEEDED")).toContain("利用枠");
+    const text = generationDiagnostics({
+      httpStatus: 429,
+      apiStatus: "RESOURCE_EXHAUSTED",
+      stage: "GENERATE",
+      limitType: "PER_DAY",
+    });
+    expect(text).toContain("HTTP 429");
+    expect(text).toContain("日単位");
+    expect(text).toContain("回答生成");
+    expect(
+      generationDiagnostics({
+        httpStatus: 404,
+        apiStatus: "raw-secret-sentinel",
+        stage: "MODEL_INFO",
+        limitType: "UNKNOWN",
+      }),
+    ).not.toContain("sentinel");
+  });
+  it("distinguishes fixed responses from paid real API authentication", () => {
+    expect(sourceLabel("STUB")).toContain("固定応答");
+    expect(sourceLabel("STUB")).toContain("外部API呼出なし");
+    expect(sourceLabel("DEMO")).toContain("実API");
+    expect(sourceLabel("DEMO")).toContain("料金");
+  });
   it("requires configured matching model, current affordable preview and idle state", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-10T00:00:00Z"));
@@ -125,6 +155,7 @@ describe("Gemini generation controls", () => {
       question: "説明して",
       mode: "SERVICE_REVIEW",
       workspaceId: "w",
+      source: "STUB",
     };
     const html = renderToStaticMarkup(<EnglishResult result={result} />);
     expect(html).not.toContain("<script>");
@@ -133,5 +164,6 @@ describe("Gemini generation controls", () => {
     expect(html).not.toContain("unknown");
     expect(html).toContain("未提供");
     expect(html).toContain("入力推定 20");
+    expect(html).toContain("固定応答");
   });
 });

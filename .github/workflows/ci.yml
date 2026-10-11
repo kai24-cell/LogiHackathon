@@ -62,6 +62,14 @@ jobs:
       - name: Test packaged Web and workspace integration on Windows
         run: python scripts/smoke_test.py
 
+      # Fixed providers have no HTTP client. Never activate local credentials
+      # or pass --real / --allow-paid-api in CI.
+      - name: Test normal and failed generation with fixed providers
+        run: |
+          foreach ($scenario in @('normal', 'invalid', 'timeout')) {
+            .\scripts\verify_api.ps1 -Scenario $scenario
+          }
+
       - name: Save VSIX
         uses: actions/upload-artifact@v4
         with:

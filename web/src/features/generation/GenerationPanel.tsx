@@ -19,6 +19,17 @@ const errors: Record<string, string> = {
     "生成がタイムアウトしました。自動再試行はしません。再実行は追加費用の可能性があります。",
   MODEL_UNSUPPORTED:
     "モデル名・generateContent・構造化出力対応を確認してください。",
+  MODEL_NOT_FOUND:
+    "指定モデルがAPI v1betaで見つかりません。モデルID、利用権限、廃止・バージョン互換性を確認してください。廃止かどうかはこの応答だけでは断定できません。",
+  GEMINI_INVALID_REQUEST:
+    "モデルまたはAPIバージョンが要求形式・構造化出力に対応しないか、パラメーターが不正です。入力と対応機能を確認してください。原因はこの応答だけでは断定できません。",
+  GEMINI_PRECONDITION_FAILED:
+    "APIの利用前提を満たしていません。課金・地域・プロジェクトの利用設定を確認してください。",
+  GEMINI_QUOTA_EXCEEDED:
+    "APIの利用枠を超えています。時間単位・日単位の割当とプロジェクト設定を確認してください。自動再試行はしません。",
+  GEMINI_BILLING_REQUIRED:
+    "APIの支払い条件を満たしていません。残高・課金設定を確認してください。",
+  GEMINI_SERVER_ERROR: "API側の内部エラーです。自動再試行はしません。",
   MODEL_LIMIT_EXCEEDED:
     "モデル固有の入力／出力上限を超えています。予算・選択・出力設定を変更してください。",
   GEMINI_BLOCKED:
@@ -43,15 +54,62 @@ export function generationError(code: string): string {
   );
 }
 
+export function sourceLabel(source: string | undefined): string {
+  if (source === "STUB")
+    return "固定応答（外部API呼出なし・実測値ではありません）";
+  if (source === "DEMO")
+    return "デモ用認証による実API（料金が発生する可能性があります）";
+  return "ユーザー認証による実API（料金が発生する可能性があります）";
+}
+
+/** 外部の任意文字列は表示せず、定型値だけで失敗箇所と制限を説明する。 */
+export function generationDiagnostics(
+  details: GenerationJob["errorDetails"],
+): string {
+  if (!details) return "";
+  const stages = { MODEL_INFO: "モデル情報取得", GENERATE: "回答生成" };
+  const limits = {
+    PER_MINUTE: "分単位の利用上限",
+    PER_DAY: "日単位の利用上限",
+    MULTIPLE: "分・日単位の利用上限",
+    UNKNOWN: "制限の内訳は未特定",
+  };
+  const statuses = new Set([
+    "INVALID_ARGUMENT",
+    "FAILED_PRECONDITION",
+    "PERMISSION_DENIED",
+    "UNAUTHENTICATED",
+    "NOT_FOUND",
+    "RESOURCE_EXHAUSTED",
+    "UNAVAILABLE",
+    "INTERNAL",
+    "DEADLINE_EXCEEDED",
+    "UNIMPLEMENTED",
+    "UNKNOWN",
+  ]);
+  const http =
+    Number.isInteger(details.httpStatus) &&
+    details.httpStatus >= 100 &&
+    details.httpStatus <= 599
+      ? details.httpStatus
+      : "未特定";
+  const status = statuses.has(details.apiStatus)
+    ? details.apiStatus
+    : "UNKNOWN";
+  return `${stages[details.stage] ?? "失敗箇所は未特定"}：HTTP ${http} / ${status}。${limits[details.limitType] ?? "制限の内訳は未特定"}。`;
+}
+
 /** 送信時の入力を固定する。編集は許可し、ポーリングでは生成APIを再送しない。 */
 export function GenerationPanel({
   input,
   preview,
   busy,
+  onModelConfigured,
 }: {
   input: PreviewInput;
   preview?: BudgetResult;
   busy: boolean;
+  onModelConfigured?: (modelId: string) => void;
 }) {
   const [settings, setSettings] = useState<GenerationSettings>();
   const [key, setKey] = useState("");
@@ -148,6 +206,25 @@ export function GenerationPanel({
     }
   }
 
+  /** 認証値をWebへ取り出さず、明示操作でデモ／固定応答の設定を有効にする。 */
+  async function activateSource(source: "demo" | "stub") {
+    if (saving || running) return;
+    settingsRequestVersion.current += 1;
+    setSaving(true);
+    setError("");
+    try {
+      const value = await api<GenerationSettings>(`/settings/${source}`, {});
+      setSettings(value);
+      onModelConfigured?.(value.modelId);
+    } catch (failure) {
+      setSettings(undefined);
+      setError("設定操作に失敗しました。" + apiErrorMessage(failure));
+    } finally {
+      setKey("");
+      setSaving(false);
+    }
+  }
+
   /** 通信結果が不明な再送には同じrequestIdを使い、重複課金を防ぐ。 */
   async function send() {
     const fixed = current.current;
@@ -205,22 +282,41 @@ export function GenerationPanel({
     <section>
       <h2>Geminiによる英語回答</h2>
       <p>
-        実APIへの送信です。料金が発生する可能性があります。翻訳は後続Issueのため、今回は英語の構造化回答を表示します。
+        実APIモードでは料金が発生する可能性があります。固定応答モードは外部APIを呼びません。翻訳は後続Issueのため、今回は英語の構造化回答を表示します。
       </p>
       <p>
         previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
       </p>
-      <label>
-        Gemini APIキー
-        <input
-          type="password"
-          autoComplete="off"
-          value={key}
-          onChange={(event) => setKey(event.target.value)}
-        />
-      </label>
+      {settings?.configured && <p>{sourceLabel(settings.source)}</p>}
+      {settings?.demoAvailable && (
+        <button
+          disabled={saving || running}
+          onClick={() => void activateSource("demo")}
+        >
+          ローカルのデモ認証を利用（実API）
+        </button>
+      )}
+      {settings?.stubAvailable && (
+        <button
+          disabled={saving || running}
+          onClick={() => void activateSource("stub")}
+        >
+          固定応答を有効化（キー不要）
+        </button>
+      )}
+      {!settings?.stubAvailable && (
+        <label>
+          Gemini APIキー
+          <input
+            type="password"
+            autoComplete="off"
+            value={key}
+            onChange={(event) => setKey(event.target.value)}
+          />
+        </label>
+      )}
       <button
-        disabled={!key || saving || running}
+        disabled={!key || saving || running || settings?.stubAvailable}
         onClick={() => void configure()}
       >
         現在のモデルIDとキーを設定
@@ -233,7 +329,9 @@ export function GenerationPanel({
       </button>
       <p>
         {settings?.configured
-          ? `キー設定済み（モデルID: ${settings.modelId}、Gemini疎通は未確認）`
+          ? settings.source === "STUB"
+            ? `固定応答設定済み（モデルID: ${settings.modelId}）`
+            : `キー設定済み（モデルID: ${settings.modelId}、Gemini疎通は未確認）`
           : settings
             ? "キー未設定"
             : "キー設定状態を確認できません（未設定とは限りません）"}
@@ -249,7 +347,11 @@ export function GenerationPanel({
         }
         onClick={() => void send()}
       >
-        {running ? "生成中…" : "選定コードと質問をGeminiへ送信"}
+        {running
+          ? "生成中…"
+          : settings?.stubAvailable
+            ? "選定コードと質問で固定応答を検証"
+            : "選定コードと質問をGeminiへ送信"}
       </button>
       {running && jobId && (
         <button onClick={() => void cancel()}>
@@ -264,6 +366,7 @@ export function GenerationPanel({
             : generationError(job.errorCode)}
         </p>
       )}
+      {job?.errorDetails && <p>{generationDiagnostics(job.errorDetails)}</p>}
       {job?.result && <EnglishResult result={job.result} />}
     </section>
   );
@@ -293,6 +396,7 @@ export function EnglishResult({
     <article>
       <h3>英語回答（未翻訳）</h3>
       <p>実行時の質問：{result.question}</p>
+      <p>{sourceLabel(result.source)}</p>
       <p>
         生成対象snapshot：{result.snapshotId}
         。入力の編集はこの回答へ反映されません。

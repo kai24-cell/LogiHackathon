@@ -5,6 +5,9 @@ export interface GenerationSettings {
   modelId: string;
   configured: boolean;
   version: string;
+  source?: "NONE" | "USER" | "DEMO" | "STUB";
+  demoAvailable?: boolean;
+  stubAvailable?: boolean;
 }
 export interface GenerationStart {
   previewId: string;
@@ -33,6 +36,12 @@ export interface GenerationJob {
   jobId: string;
   state: "QUEUED" | "GENERATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
   errorCode: string | null;
+  errorDetails?: {
+    httpStatus: number;
+    apiStatus: string;
+    stage: "MODEL_INFO" | "GENERATE";
+    limitType: "PER_MINUTE" | "PER_DAY" | "MULTIPLE" | "UNKNOWN";
+  } | null;
   result: {
     answerEnglish: EnglishAnswer;
     references: {
@@ -57,6 +66,7 @@ export interface GenerationJob {
     question: string;
     mode: PreviewInput["mode"];
     workspaceId: string;
+    source?: "USER" | "DEMO" | "STUB";
   } | null;
 }
 export function canGenerate(

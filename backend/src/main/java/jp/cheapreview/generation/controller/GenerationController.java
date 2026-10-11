@@ -42,6 +42,16 @@ public class GenerationController {
     return settings.status();
   }
 
+  @PostMapping("/settings/demo")
+  public SettingsDtos.Status demo() {
+    return settings.useDemo();
+  }
+
+  @PostMapping("/settings/stub")
+  public SettingsDtos.Status stub() {
+    return settings.useStub();
+  }
+
   @PostMapping("/analysis/jobs")
   @ResponseStatus(HttpStatus.ACCEPTED)
   public GenerationDtos.Started start(@RequestBody GenerationDtos.Start request) {

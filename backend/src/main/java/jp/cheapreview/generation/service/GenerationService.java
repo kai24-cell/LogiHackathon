@@ -193,13 +193,14 @@ public class GenerationService {
               preview.snapshotId(),
               entry.input.input().question(),
               entry.input.input().mode(),
-              entry.input.input().workspaceId());
+              entry.input.input().workspaceId(),
+              credentials.source());
       synchronized (this) {
         if (entry.view.state() == State.GENERATING)
           transition(entry, State.SUCCEEDED, null, result);
       }
     } catch (GenerationFailure failure) {
-      fail(entry, failure.getMessage());
+      fail(entry, failure.getMessage(), failure.details());
     } catch (Exception exception) {
       fail(entry, "GENERATION_FAILED");
     } finally {
@@ -218,8 +219,14 @@ public class GenerationService {
   }
 
   private synchronized void fail(Entry entry, String code) {
+    fail(entry, code, null);
+  }
+
+  private synchronized void fail(Entry entry, String code, GenerationDtos.ErrorDetails details) {
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING)
-      transition(entry, State.FAILED, code, null);
+      entry.view =
+          new GenerationDtos.Job(
+              entry.view.jobId(), State.FAILED, code, null, entry.view.createdAt(), details);
   }
 
   private void transition(Entry entry, State state, String code, GenerationDtos.Result result) {

@@ -1,6 +1,18 @@
 import { ApiFailure } from "./client";
 
 const messages: Record<string, string> = {
+  DEMO_NOT_CONFIGURED:
+    "デモ用ローカル設定がありません。.envを用意し、デモ設定のパスを指定して起動してください。",
+  INVALID_DEMO_CONFIG:
+    "デモ用ローカル設定のモデルID・キー・形式を手元で確認してください。内容は共有しないでください。",
+  INVALID_DEMO_MODEL:
+    ".envのCHEAPREVIEW_DEMO_MODELにモデルIDを設定してください。models/等のパスは付けず、正式なIDを使ってください。",
+  INVALID_DEMO_KEY:
+    ".envのCHEAPREVIEW_DEMO_GEMINI_KEYの入力形式を手元で確認してください。キーの値は共有しないでください。",
+  STUB_ONLY_MODE:
+    "固定応答モードでは実APIキーを設定できません。実API用の起動方法へ切り替えてください。",
+  STUB_NOT_ENABLED:
+    "固定応答providerで起動していません。start.ps1 -Stubを使ってください。",
   CONNECTION_REQUIRED:
     "接続情報がありません。ページ再読込後はVS CodeのCheapReview: Open Webで開き直してください。",
   INVALID_CONNECTION:

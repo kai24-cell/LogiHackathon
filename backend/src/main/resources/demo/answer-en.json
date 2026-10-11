@@ -1,0 +1,1 @@
+{"summary":"Fixed response for the local demo; not a model result.","sections":[{"title":"Order validation","body":"The service checks quantity before saving an order. This fixture is illustrative and does not analyze arbitrary projects.","code":"","referenceIds":["ref-1"]}],"findings":[],"limitations":["Fixed fixture. Translation is not implemented in Issue #14."]}
