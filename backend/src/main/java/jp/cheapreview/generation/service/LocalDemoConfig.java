@@ -53,7 +53,7 @@ public class LocalDemoConfig {
       String model = values.getOrDefault("CHEAPREVIEW_DEMO_MODEL", "");
       String key = values.getOrDefault("CHEAPREVIEW_DEMO_GEMINI_KEY", "");
       if (!model.matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}")) throw failure("INVALID_DEMO_MODEL");
-      if (!key.matches("[a-zA-Z0-9_-]{8,256}")) throw failure("INVALID_DEMO_KEY");
+      if (!ApiKeyValidation.isSafeHeaderValue(key)) throw failure("INVALID_DEMO_KEY");
       // 翻訳用projectと認証ファイルのパスは予約項目。#8までは認証JSONを読まない。
       return new Credentials(model, key);
     } catch (IOException | IllegalArgumentException exception) {

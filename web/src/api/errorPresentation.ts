@@ -8,7 +8,7 @@ const messages: Record<string, string> = {
   INVALID_DEMO_MODEL:
     ".envのCHEAPREVIEW_DEMO_MODELにモデルIDを設定してください。models/等のパスは付けず、正式なIDを使ってください。",
   INVALID_DEMO_KEY:
-    ".envのCHEAPREVIEW_DEMO_GEMINI_KEYの入力形式を手元で確認してください。キーの値は共有しないでください。",
+    ".envのCHEAPREVIEW_DEMO_GEMINI_KEYが空でないこと、空白・改行・制御文字がないことを確認してください。外側の対応する引用符は使用できます。キーの値は共有しないでください。",
   STUB_ONLY_MODE:
     "固定応答モードでは実APIキーを設定できません。実API用の起動方法へ切り替えてください。",
   STUB_NOT_ENABLED:
@@ -22,7 +22,7 @@ const messages: Record<string, string> = {
   INVALID_MODEL_ID:
     "モデルIDの形式が不正です。models/やURL・空白を含まないID（英数字・ピリオド・ハイフン・アンダースコア、200文字以内）を入力してください。",
   INVALID_API_KEY:
-    "APIキーの入力形式が不正です。キーだけを入力し、空白・改行・引用符を含めないでください。",
+    "APIキーの入力形式が不正です。キーだけを入力し、空白・改行・制御文字を含めないでください。入力上限は4,096文字です。認証の有効性は実APIで確認します。",
   INVALID_SETTINGS:
     "モデルIDとAPIキーの形式を確認してください。models/やURL、空白・引用符は含めないでください。",
   INVALID_PREVIEW_REQUEST:

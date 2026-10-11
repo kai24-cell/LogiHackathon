@@ -14,7 +14,7 @@ describe("safe API diagnostics", () => {
       "models/",
     );
     expect(apiErrorMessage(new ApiFailure(400, "INVALID_API_KEY"))).toContain(
-      "引用符",
+      "制御文字",
     );
     expect(apiErrorMessage(new ApiFailure(0, "CONNECTION_REQUIRED"))).toContain(
       "ページ再読込",

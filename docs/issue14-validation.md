@@ -69,10 +69,24 @@ Interactions APIとgenerateContentのエラー形式は異なるため、別API�
 修正後は実APIを再実行せず、stubで確認する。
 
 後続のユーザー指示でモデル・制限のエラー分類を補強した。HTTP/定型status/失敗段階の保持と秘密を含む未知statusの破棄をstub回帰テストで確認する。
-ローカルキーを修正したという返信はまだなく、実APIの再実行は保留する。
+この段階では入力確認待ちとして実APIの再実行を保留した。以下の追加確認でアプリの独自検証が原因と判明したため、この保留は解消している。
 
 再レビューではP3の解消と追加エラー分類の安全性を確認し、新たな確実な不具合なし。最終jarのstub3ケースも成功した。
 
 Windows PowerShell 5.1のラッパー直接確認で、日本語を含むUTF-8 BOMなしスクリプトの構文エラーを検出した。
 verify_api.ps1をUTF-8 BOM付きに変更し、CIの固定生成3ケースもWindows PowerShellで実行して互換性を検証する。
 修正後にPS5.1のラッパー経由でnormal/invalid/timeoutの3ケース成功。reviewerもBOMとCI設定を確認し、追加指摘なし。
+
+## デモキーの独自検証修正と実API1回の確認
+
+追加のHTTP client stub 7テストとSpotless check成功。修正済みjarの固定normal/invalid/timeoutも成功（実APIへの追加通信なし）。
+
+ユーザー指示に基づき`.env`はキー値を出力せず、設定有無・文字数・外側の空白・引用符だけを確認した。空白や引用符の混入はなく、旧検証は拒否、新しいヘッダー安全検証は受理した。入力の修正を求める原因ではなく、アプリの英数字・underscore・hyphen限定/8〜256文字という独自条件が原因だった。接頭辞チェックは元々ない。
+
+通常設定とデモ設定の検証を共通化し、空でないprintable ASCII、4,096文字までを受理する。空白・制御文字・非ASCIIはHTTPヘッダーの安全性、上限は資源保護のために拒否する。外側の対応する単一/二重引用符とBOMは既存ローダーで処理し、シェル展開しない。有効な認証かどうかは実APIで判定する。[公式キー説明](https://ai.google.dev/gemini-api/docs/api-key)で標準キーと認可キーの存在、およびx-goog-api-key利用を確認した（2026-10-11）。
+
+回帰テストでJSONの末尾backslashの部分残存と、長いキーによる正規表現のStackOverflowも検出・修正した。比較用のescape復元と元範囲のマークにより非再帰でマスクし、それ以外のJSON表現を保持する。関連24テスト、Java全体134テスト・Spotless check・verify・jar生成、Web32テスト・整形・Lint・型チェック・buildが成功した。専用reviewerの限定再レビューで新たな確実な漏えい指摘なし。
+
+修正済みjarで`verify_api.ps1 -Real -AllowPaidApi`を一度だけ実行。デモ設定・専用サンプルの走査/解析/検索・予算/preview検証・実モデル情報GETは通過し、generateContent POSTを1回送信した。応答はGENERATE段階のHTTP 404 / NOT_FOUND、固定コードMODEL_NOT_FOUND。モデル情報GETは1回、生成POSTは1回、再送・別モデルへの代替は0回。生成成功・schema/参照の実回答受入・usage/実費は未確認。キー・リクエスト・生応答は記録していない。
+
+GET成功でも実生成は失敗したため、モデル廃止/APIバージョンとの非互換は断定しない。[公式生成API](https://ai.google.dev/api/generate-content)のv1beta/models/{model}:generateContentと宛先構築を照合し、stubでもv1beta prefix/GET/POSTの正確なパスを検証する。次の実通信は利用するモデルの確認とユーザーの再実行指示を待つ。翻訳は未確認のまま。

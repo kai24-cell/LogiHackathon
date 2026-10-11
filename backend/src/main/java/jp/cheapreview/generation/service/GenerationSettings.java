@@ -50,7 +50,7 @@ public class GenerationSettings {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_SETTINGS");
     if (update.modelId() == null || !update.modelId().matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}"))
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_MODEL_ID");
-    if (update.apiKey() == null || !update.apiKey().matches("[a-zA-Z0-9_-]{8,256}"))
+    if (!ApiKeyValidation.isSafeHeaderValue(update.apiKey()))
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_API_KEY");
 
     // 検証完了前には既存設定を変更せず、例外にも入力値を含めない。

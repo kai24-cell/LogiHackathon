@@ -108,4 +108,64 @@ class LocalDemoConfigTest {
         ResponseStatusException.class,
         () -> new GenerationSettings(new LocalDemoConfig(""), "real").useStub());
   }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "x",
+        "fixture.with+slash/equals=",
+        "\"fixture.with+slash/equals=\"",
+        "'fixture.with+slash/equals='"
+      })
+  void opaqueKeysAndOuterQuotesAreAcceptedWithoutChangingTheValue(String configuredKey)
+      throws Exception {
+    var config =
+        config(
+            "CHEAPREVIEW_DEMO_MODEL=fixture-model\nCHEAPREVIEW_DEMO_GEMINI_KEY=  "
+                + configuredKey
+                + "  \n");
+    String expected =
+        configuredKey.startsWith("\"") || configuredKey.startsWith("'")
+            ? configuredKey.substring(1, configuredKey.length() - 1)
+            : configuredKey;
+    assertEquals(expected, config.load().key());
+    var settings = new GenerationSettings(config, "real");
+    var status = settings.update(new SettingsDtos.Update("fixture-model", expected));
+    assertEquals(expected, settings.capture(status.version(), status.modelId()).key());
+  }
+
+  @Test
+  void keyLengthDoesNotAssumeProviderFormatButStillHasAResourceLimit() throws Exception {
+    var settings = new GenerationSettings(new LocalDemoConfig(""), "real");
+    assertTrue(
+        settings.update(new SettingsDtos.Update("fixture-model", "x".repeat(4096))).configured());
+    var tooLong =
+        config(
+            "CHEAPREVIEW_DEMO_MODEL=fixture-model\nCHEAPREVIEW_DEMO_GEMINI_KEY="
+                + "x".repeat(4097));
+    assertEquals(
+        "INVALID_DEMO_KEY", assertThrows(ResponseStatusException.class, tooLong::load).getReason());
+    assertEquals(
+        "INVALID_API_KEY",
+        assertThrows(
+                ResponseStatusException.class,
+                () -> settings.update(new SettingsDtos.Update("fixture-model", "x".repeat(4097))))
+            .getReason());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"", "bad key", "bad\tkey", "bad\rkey", "bad\nkey", "bad\u007fkey", "非ASCII"})
+  void unsafeHeaderValuesAreRejectedAndExistingSettingsAreKept(String value) {
+    var settings = new GenerationSettings(new LocalDemoConfig(""), "real");
+    var before = settings.update(new SettingsDtos.Update("fixture-model", KEY));
+    assertEquals(
+        "INVALID_API_KEY",
+        assertThrows(
+                ResponseStatusException.class,
+                () -> settings.update(new SettingsDtos.Update("fixture-model", value)))
+            .getReason());
+    assertEquals(before, settings.status());
+    assertFalse(ApiKeyValidation.isSafeHeaderValue(value));
+  }
 }

@@ -41,12 +41,15 @@ class GeminiHttpClientTest {
     executor = Executors.newCachedThreadPool();
     server.setExecutor(executor);
     server.createContext(
-        "/models/fixture-model",
+        "/v1beta/models/fixture-model",
         exchange -> {
           try {
             keyHeader.set(exchange.getRequestHeaders().getFirst("x-goog-api-key"));
             assertNull(exchange.getRequestURI().getQuery());
             boolean post = exchange.getRequestMethod().equals("POST");
+            assertEquals(
+                "/v1beta/models/fixture-model" + (post ? ":generateContent" : ""),
+                exchange.getRequestURI().getPath());
             if (post) {
               posts.incrementAndGet();
               postBody.set(
@@ -65,7 +68,9 @@ class GeminiHttpClientTest {
     server.start();
     client =
         new GeminiHttpClient(
-            mapper, URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/"), 1);
+            mapper,
+            URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1beta/"),
+            1);
   }
 
   @AfterEach
