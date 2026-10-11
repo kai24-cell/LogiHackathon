@@ -20,6 +20,7 @@ import jp.cheapreview.budget.dto.BudgetPreview.Chunk;
 import jp.cheapreview.budget.dto.BudgetPreview.Excluded;
 import jp.cheapreview.budget.dto.BudgetPreview.Request;
 import jp.cheapreview.budget.dto.BudgetPreview.Result;
+import jp.cheapreview.generation.service.OutboundSanitizer;
 import jp.cheapreview.search.dto.CodeSearch;
 import jp.cheapreview.search.service.CodeSearchService;
 import jp.cheapreview.workspace.service.WorkspaceCapture;
@@ -74,6 +75,7 @@ public class BudgetPreviewService {
   /** 必須分を保持したまま予算判定し、候補追加のたびに完全promptと安全余裕を再計算する。 */
   public synchronized Result preview(WorkspaceCapture capture, Request request) {
     validate(capture, request);
+    OutboundSanitizer.checkQuestion(request.question());
     var parsed = analysis.analyze(capture);
     var ranking =
         search.search(
@@ -178,12 +180,13 @@ public class BudgetPreviewService {
                 "主選択の設定ファイル本文は未保持。秘密情報方針未確定のため送信候補にできません。Javaを選択してください。"));
       } else
         selected.add(
-            builder.build(
-                javaFile,
-                capture.javaSources().get(file.relativePath()),
-                request,
-                true,
-                settings.maxMethodsPerFile()));
+            OutboundSanitizer.sanitize(
+                builder.build(
+                    javaFile,
+                    capture.javaSources().get(file.relativePath()),
+                    request,
+                    true,
+                    settings.maxMethodsPerFile())));
     }
     long mandatoryTokens =
         estimator.estimate(PromptMaterializer.materialize(request, selected)).tokens();
@@ -222,13 +225,25 @@ public class BudgetPreviewService {
         excluded.add(
             new Excluded(candidate.fileId(), candidate.relativePath(), "主選択の必須分が不足しているため任意追加なし"));
       } else {
-        var chunk =
-            builder.build(
-                file,
-                capture.javaSources().get(candidate.relativePath()),
-                request,
-                false,
-                settings.maxMethodsPerFile());
+        Chunk chunk;
+        try {
+          chunk =
+              OutboundSanitizer.sanitize(
+                  builder.build(
+                      file,
+                      capture.javaSources().get(candidate.relativePath()),
+                      request,
+                      false,
+                      settings.maxMethodsPerFile()));
+        } catch (ResponseStatusException exception) {
+          // 任意候補の疑わしい情報は除外し、主選択は勝手に除外して成功扱いにしない。
+          excluded.add(
+              new Excluded(
+                  candidate.fileId(),
+                  candidate.relativePath(),
+                  "秘密情報の疑いがあり任意候補を除外。自動検出は完全ではありません。"));
+          continue;
+        }
         // density=R/max(T_chunk,1)。Rは0〜1、T_chunkは暫定tokens。0除算を防ぎ順序を固定する。
         // 見込み量は候補順にだけ使用し、採用判定は参照・指示を含む完全promptで行う。
         double density =

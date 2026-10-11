@@ -10,7 +10,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, ProxyHandler, build_opener
 
 ROOT = Path(__file__).resolve().parent.parent
-PORT = 8765
+PORT = int(os.environ.get('CHEAPREVIEW_SMOKE_PORT', '8765'))
+if not 1 <= PORT <= 65535:
+    raise ValueError('Invalid smoke test port')
 STARTUP_TIMEOUT_SECONDS = 30
 SCAN_TIMEOUT_SECONDS = 70
 POLL_INTERVAL_SECONDS = 0.2
@@ -28,7 +30,7 @@ def main():
     java = str(Path(environment['JAVA_HOME']) / 'bin' / 'java.exe')
     jar = ROOT / 'dist/cheapreview-0.1.0.jar'
     process = subprocess.Popen(
-        [java, '-jar', str(jar)], cwd=ROOT, env=environment,
+        [java, '-jar', str(jar), f'--server.port={PORT}'], cwd=ROOT, env=environment,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
@@ -57,6 +59,10 @@ def main():
                 time.sleep(POLL_INTERVAL_SECONDS)
         with opener.open(BASE_URL + '/', timeout=5) as response:
             assert '<div id="root">' in response.read().decode('utf-8')
+        settings = call('/api/v1/settings')
+        assert not settings['configured']
+        assert 'apiKey' not in settings
+        assert call('/api/v1/analysis/jobs/active')['jobId'] is None
         try:
             call('/api/v1/status', authenticated=False)
             raise AssertionError('Unauthenticated status was accepted')

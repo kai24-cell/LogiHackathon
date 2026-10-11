@@ -110,6 +110,46 @@ public class WorkspaceService {
     return capture;
   }
 
+  /** 送信対象の保存済みJavaだけをhash照合する。対象外の探索やコードの再取り込みは行わない。 */
+  public synchronized void verifyUnchanged(
+      String workspaceId,
+      String snapshotId,
+      java.util.List<jp.cheapreview.budget.dto.BudgetPreview.Chunk> chunks) {
+    var capture = getCapture(workspaceId, snapshotId);
+    try {
+      for (var chunk : chunks) {
+        var file =
+            capture.snapshot().files().stream()
+                .filter(
+                    item ->
+                        item.fileId().equals(chunk.fileId())
+                            && item.relativePath().equals(chunk.relativePath()))
+                .findFirst()
+                .orElseThrow(() -> new IOException("INVALID_SCOPE"));
+        if (!capture.javaSources().containsKey(file.relativePath()))
+          throw new IOException("INVALID_SCOPE");
+        Path path = capture.root().resolve(file.relativePath());
+        WorkspacePaths.requireWithinRoot(path, capture.root());
+        if (java.nio.file.Files.size(path) != file.sizeBytes())
+          throw new IOException("FILE_CHANGED");
+        // 照合中にファイルが増大しても、保存時の容量+1までしか読み取らない。
+        if (file.sizeBytes() > Integer.MAX_VALUE - 1) throw new IOException("FILE_CHANGED");
+        byte[] bytes;
+        try (var stream =
+            java.nio.file.Files.newInputStream(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+          bytes = stream.readNBytes((int) file.sizeBytes() + 1);
+        }
+        String hash =
+            java.util.HexFormat.of()
+                .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        if (bytes.length != file.sizeBytes() || !hash.equals(file.sha256()))
+          throw new IOException("FILE_CHANGED");
+      }
+    } catch (Exception exception) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "FILE_CHANGED");
+    }
+  }
+
   private void runScan(String jobId, String workspaceId, Path root, Options options) {
     synchronized (this) {
       jobs.put(jobId, new ScanJob(jobId, JobState.SCANNING, null));

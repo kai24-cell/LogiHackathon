@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { apiErrorMessage } from "../../api/errorPresentation";
 import type { BudgetResult } from "../../types/budget";
 import type { SearchMode } from "../../types/search";
 import {
@@ -10,6 +11,7 @@ import {
   validationIsCurrent,
 } from "./previewState";
 import type { PreviewInput } from "./previewState";
+import { GenerationPanel } from "../generation/GenerationPanel";
 
 const PREVIEW_DELAY_MS = 300;
 
@@ -91,12 +93,10 @@ export function BudgetPanel({
             setNow(Date.now());
           }
         })
-        .catch(() => {
+        .catch((failure: unknown) => {
           if (!cancelled) {
             setCompleted(undefined);
-            setError(
-              "概算を取得できません。接続・予算・モデル設定・主選択・targetを確認し、必要なら再走査してください。",
-            );
+            setError("概算取得に失敗しました。" + apiErrorMessage(failure));
           }
         });
     }, PREVIEW_DELAY_MS);
@@ -131,7 +131,7 @@ export function BudgetPanel({
         )
       )
         setVerifiedKey(startedKey + result.previewId);
-    } catch {
+    } catch (failure) {
       if (
         validationIsCurrent(
           startedKey,
@@ -141,9 +141,7 @@ export function BudgetPanel({
         )
       ) {
         setCompleted(undefined);
-        setError(
-          "予算またはpreviewの有効性を確認できませんでした。入力を見直して概算を更新してください。",
-        );
+        setError("組み立て確認に失敗しました。" + apiErrorMessage(failure));
       }
     } finally {
       setChecking(false);
@@ -170,7 +168,7 @@ export function BudgetPanel({
       <label>
         モデルID（料金設定のキー）
         <input
-          type="password"
+          type="text"
           autoComplete="off"
           value={modelId}
           onChange={(event) => setModelId(event.target.value)}
@@ -230,6 +228,7 @@ export function BudgetPanel({
           予算と有効性を確認しました。外部APIへの送信は行っていません。
         </p>
       )}
+      <GenerationPanel input={input} preview={result} busy={busy} />
     </section>
   );
 }

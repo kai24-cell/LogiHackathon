@@ -1,0 +1,13 @@
+{"type":"object","additionalProperties":false,
+ "required":["summary","sections","findings","limitations"],"properties":{
+ "summary":{"type":"string"},
+ "sections":{"type":"array","items":{"type":"object","additionalProperties":false,
+   "required":["title","body","code","referenceIds"],"properties":{
+   "title":{"type":"string"},"body":{"type":"string"},"code":{"type":"string"},
+   "referenceIds":{"type":"array","items":{"type":"string"}}}}},
+ "findings":{"type":"array","items":{"type":"object","additionalProperties":false,
+   "required":["severity","title","explanation","suggestion","referenceIds"],"properties":{
+   "severity":{"enum":["INFO","LOW","MEDIUM","HIGH"]},"title":{"type":"string"},
+   "explanation":{"type":"string"},"suggestion":{"type":"string"},
+   "referenceIds":{"type":"array","items":{"type":"string"}}}}},
+ "limitations":{"type":"array","items":{"type":"string"}}}}
