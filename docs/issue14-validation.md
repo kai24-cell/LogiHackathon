@@ -79,6 +79,14 @@ verify_api.ps1をUTF-8 BOM付きに変更し、CIの固定生成3ケースもWin
 
 ## デモキーの独自検証修正と実API1回の確認
 
+### 実ブラウザ受入の保留と再開（2026-10-12）
+
+利用者の指示により#14の接続・実ブラウザ確認を保留し、#8・#9・#10を先行する。Playwright MCPは利用可能で、最新検証済みjarを既存start.ps1 -Demo -NoBrowserで起動し、http://127.0.0.1:8765 のCheapReview画面を開けた。接続fragmentなしの画面はCONNECTION_REQUIREDでフォルダ選択が無効となり、認証保護を確認した。MCP側で起動スクリプトの正規接続情報を安全に移す手段は未確認で、認証を迂回していない。MCPでのデモ設定・概算表示・生成は未実施、実API追加通信0回。キー・接続トークンは出力していない。
+
+再開時は既存の起動ターミナルで必要ならCtrl+C後、最新jarを配置してscripts/start.ps1 -Demoを実行する。VS CodeでCheapReview: Open Webを実行し、その接続済みブラウザをMCPが操作できるよう接続する。トークン付きURLやruntime.jsonをチャットへ貼らない。Webのフォルダ選択後、VS Codeダイアログでsamples/api-validationを選択する操作は手動で行う。OrderService.java主選択・SERVICE_REVIEW・case.jsonの質問・入力予算8192で、まずデモ設定と概算を確認する。実生成の再開には新しい利用者指示を受け、1回だけ送信して英語説明・schema・参照・usageまたは段階・HTTP・timeout・経過msを確認する。離席中は実APIもマージも実行しない。
+
+後続PRのマージ順は#14（PR17）→#8（翻訳）→#9（会話/TXT）→#10（導入/提出）。後続は#14を前提として実装可能だが、各PRで依存関係・実API/実ブラウザ未確認を区別する。
+
 ### タイムアウト診断の追加（実API通信なし）
 
 677eaf6での追加実API確認はGENERATION_TIMEOUTで終了し、回答ファイルは未作成だった。当時の検証スクリプトは子プロセスstdout/stderrを破棄し、HttpClientタイムアウト／240秒ジョブ期限の両方を同じ固定コードかつ詳細なしで返した。そのため、既存結果からGET／POST・接続／応答待ち／ジョブ期限を確定することはできない。過去の原因を新しい実装から推測しない。

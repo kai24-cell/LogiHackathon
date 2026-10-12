@@ -368,7 +368,7 @@ export function GenerationPanel({
         {translationReady === true
           ? "翻訳認証設定あり（有効性・疎通は未確認）"
           : translationReady === false
-            ? "翻訳未設定：バックエンドのGCP認証とprojectを設定してください。英語回答は保持されます。"
+            ? "現在は英語回答。日本語翻訳は未設定。会話履歴とTXT保存は英語回答でも利用できます。"
             : "翻訳設定の状態は未確認です。"}
       </p>
       <p>
