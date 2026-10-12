@@ -67,3 +67,9 @@ Vite設定はoutDir/emptyOutDirを上書きしていないため、標準のproj
 梱包検査に.playwright-mcp/validation-results/user-workspacesを禁止ディレクトリとして追加。公開の専用サンプルcase.jsonと固定回答fixtureは保持し、実回答や利用者会話とは区別するfixtureを追加した。実キー・認証JSON・実回答は読み込まず、実API通信は行っていない。
 
 `python -m unittest discover -s scripts -p 'test_*distribution*.py' -v`の12件、変更Pythonの`py_compile`、`git diff --check`が成功。変更は梱包判定と文書・fixtureに限定し、Java/Web/拡張の再ビルドはこの追記では行っていない。最新push後の通常ビルド・既存チェックはCIで確認する。
+
+## 締切対応の英語回答版統合（2026-10-12）
+
+利用者の統合・提出許可によりmain bb63182（#14と#8）を通常mergeした。導入ガイドとREADMEを英語回答版へ更新し、デモ認証/固定応答・翻訳は実装済み、翻訳認証未設定でも英語表示で利用可能と明記。#9は親のマージ後に最終mainを取り込んで会話/TXT操作を確定する。実翻訳・実ブラウザ受入は未確認として維持する。
+
+梱包fixture12件とdiff checkが成功。ZIPのfresh再作成と展開検査は親のrelease worktreeで実施する。実API・秘密ファイル読取は行っていない。
