@@ -13,6 +13,11 @@ import {
 import type { PreviewInput } from "./previewState";
 import { GenerationPanel } from "../generation/GenerationPanel";
 
+import {
+  ConversationPanel,
+  type ConversationView,
+} from "../conversation/ConversationPanel";
+
 const PREVIEW_DELAY_MS = 300;
 
 /** 入力変更をdebounceし、計算中・期限切れ・入力違いの結果では確認操作を許可しない。 */
@@ -31,6 +36,8 @@ export function BudgetPanel({
   selected: ReadonlySet<string>;
   busy: boolean;
 }) {
+  const [conversation, setConversation] = useState<ConversationView>();
+  const [conversationRefresh, setConversationRefresh] = useState(0);
   const [budget, setBudget] = useState("8192");
   const [modelId, setModelId] = useState("unconfigured-model");
   const [targetFile, setTargetFile] = useState("");
@@ -49,6 +56,11 @@ export function BudgetPanel({
   const input: PreviewInput = {
     workspaceId,
     snapshotId,
+    conversationId:
+      conversation?.workspaceId === workspaceId
+        ? conversation.conversationId
+        : undefined,
+    conversationVersion: conversation?.version ?? 0,
     question,
     mode,
     selectedFileIds: [...selected].sort(),
@@ -228,11 +240,18 @@ export function BudgetPanel({
           予算と有効性を確認しました。外部APIへの送信は行っていません。
         </p>
       )}
+      <ConversationPanel
+        workspaceId={workspaceId}
+        view={conversation}
+        onChange={setConversation}
+        refresh={conversationRefresh}
+      />
       <GenerationPanel
         input={input}
         preview={result}
-        busy={busy}
+        busy={busy || !conversation || conversation.workspaceId !== workspaceId}
         onModelConfigured={setModelId}
+        onCompleted={() => setConversationRefresh((value) => value + 1)}
       />
     </section>
   );
@@ -245,7 +264,8 @@ export function BudgetSummary({ result }: { result: BudgetResult }) {
       <p>
         必須分（質問・指示等含む） {result.mandatoryPromptTokens} tokens ·
         関連追加分 {result.relatedAdditionalTokens} · 履歴{" "}
-        {result.historyTokens}
+        {result.historyTokens} tokens（採用 {result.historyTurnsIncluded}
+        往復・省略 {result.historyTurnsOmitted ?? 0}往復）
       </p>
       <p>
         全入力推定 {result.counts.tokens} tokens ＋ 安全余裕{" "}

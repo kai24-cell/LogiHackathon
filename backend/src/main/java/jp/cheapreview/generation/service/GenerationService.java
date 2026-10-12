@@ -38,6 +38,14 @@ public class GenerationService {
   private final AnswerValidator answers;
   private final TranslationService translations;
   private final ApplicationEventPublisher events;
+  private jp.cheapreview.conversation.service.ConversationService conversations;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void setConversations(
+      jp.cheapreview.conversation.service.ConversationService conversations) {
+    this.conversations = conversations;
+  }
+
   private final ExecutorService workers = Executors.newFixedThreadPool(2);
   private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
   private final Map<String, Entry> jobs = new LinkedHashMap<>();
@@ -104,7 +112,9 @@ public class GenerationService {
             original.modelId(),
             original.targetFileId(),
             original.targetMethodId(),
-            original.revision());
+            original.revision(),
+            original.conversationId(),
+            original.conversationVersion());
     var request =
         new GenerationDtos.Start(
             start.previewId(), start.requestId(), start.settingsVersion(), fixed);
@@ -232,7 +242,7 @@ public class GenerationService {
       if (entry.translationRunning && entry.future != null) entry.future.cancel(true);
       events.publishEvent(
           new TranslationDisplayUpdated(
-              id, cancelled.displayAnswer(), cancelled.partialTranslation()));
+              id, cancelled.displayAnswer(), true));
       return entry.view;
     }
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING) {
@@ -258,7 +268,8 @@ public class GenerationService {
       if (!settings.current(credentials.version())) throw new GenerationFailure("STALE_SETTINGS");
       var reply =
           provider.generate(
-              PromptMaterializer.bundle(entry.input.input(), preview.selectedChunks()),
+              PromptMaterializer.bundle(
+                  entry.input.input(), preview.selectedChunks(), preview.history().text()),
               credentials,
               preview.minimumBudgetTokens(),
               preview.maximumOutputTokens());
@@ -291,7 +302,11 @@ public class GenerationService {
               credentials.source());
       synchronized (this) {
         if (entry.view.state() != State.GENERATING) return;
-        // 英語成功を先に保持し、240秒の生成期限で翻訳中に結果を失わないよう期限を解除する。
+        // 英語成功はここで一度だけ確定する。翻訳失敗・翻訳のみ中止でも履歴を失わない。
+        // 通常生成cancel/clear済みならこの境界を通らず、翻訳の再試行ではcommitしない。
+        if (conversations != null)
+          conversations.commit(entry.input.input().conversationId(), preview.conversationVersion(),
+              entry.view.jobId(), result);
         deadline.cancel(false);
         entry.translationSymbols = TranslationSymbols.from(preview.selectedChunks());
         transition(entry, State.TRANSLATING, null, result);
@@ -299,6 +314,8 @@ public class GenerationService {
       finishTranslation(entry, 1);
     } catch (GenerationFailure failure) {
       fail(entry, failure.getMessage(), failure.details());
+    } catch (ResponseStatusException exception) {
+      fail(entry, "STALE_CONVERSATION");
     } catch (Exception exception) {
       fail(entry, "GENERATION_FAILED");
     } finally {
@@ -345,7 +362,8 @@ public class GenerationService {
               entry.view.jobId(), state, null, result, entry.view.createdAt(), null, translated);
       events.publishEvent(
           new TranslationDisplayUpdated(
-              entry.view.jobId(), translated.displayAnswer(), translated.partialTranslation()));
+              entry.view.jobId(), translated.displayAnswer(),
+              translated.partialTranslation() || translated.status() == TranslationDtos.Status.FAILED));
     }
   }
 

@@ -145,11 +145,13 @@ export function GenerationPanel({
   preview,
   busy,
   onModelConfigured,
+  onCompleted,
 }: {
   input: PreviewInput;
   preview?: BudgetResult;
   busy: boolean;
   onModelConfigured?: (modelId: string) => void;
+  onCompleted?: () => void;
 }) {
   const [settings, setSettings] = useState<GenerationSettings>();
   const [key, setKey] = useState("");
@@ -227,6 +229,7 @@ export function GenerationPanel({
           value.translation?.status !== "RUNNING"
         ) {
           pending.current = undefined;
+          if (value.result) onCompleted?.();
           return;
         }
       } catch {

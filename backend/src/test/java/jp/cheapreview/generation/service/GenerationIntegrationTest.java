@@ -65,6 +65,7 @@ class GenerationIntegrationTest {
   @Autowired WorkspaceService workspaces;
   @Autowired BudgetPreviewService budgets;
   @Autowired GenerationService generation;
+  @Autowired jp.cheapreview.conversation.service.ConversationService conversations;
   @Autowired GenerationSettings settings;
   @Autowired AnswerValidator validator;
   @Autowired ObjectMapper mapper;
@@ -599,6 +600,142 @@ class GenerationIntegrationTest {
       if (budget == 8192) response.andExpect(jsonPath("$.canExecute").value(true));
       else response.andExpect(jsonPath("$.code").value("INVALID_PREVIEW_REQUEST"));
     }
+    verifyNoInteractions(provider);
+  }
+
+  private BudgetPreview.Request conversationInput(String id, long version) {
+    var original = input(Mode.SERVICE_REVIEW, 8192);
+    return new BudgetPreview.Request(
+        original.workspaceId(),
+        original.snapshotId(),
+        original.question(),
+        original.mode(),
+        original.selectedFileIds(),
+        original.inputBudgetTokens(),
+        original.modelId(),
+        null,
+        null,
+        original.revision(),
+        id,
+        version);
+  }
+
+  @Test
+  void conversationFollowUpUsesEnglishHistoryAndExportImportDoesNotCallProvider() throws Exception {
+    var view = conversations.create(workspace);
+    var first = request(conversationInput(view.conversationId(), 0));
+    assertEquals(
+        GenerationDtos.State.SUCCEEDED, completed(generation.start(first).jobId()).state());
+    assertEquals(1, conversations.get(view.conversationId()).turns().size());
+    assertEquals(
+        409,
+        assertThrows(
+                ResponseStatusException.class,
+                () ->
+                    budgets.check(
+                        first.previewId(),
+                        workspaces.getCapture(workspace, snapshot),
+                        first.input()))
+            .getStatusCode()
+            .value());
+    var follow = conversationInput(view.conversationId(), 1);
+    var preview = budgets.preview(workspaces.getCapture(workspace, snapshot), follow);
+    assertEquals(1, preview.historyTurnsIncluded());
+    assertTrue(preview.historyTokens() > 0);
+    assertTrue(preview.historyTokens() <= follow.inputBudgetTokens() / 4);
+    assertEquals(
+        preview.counts().tokens(),
+        preview.mandatoryPromptTokens()
+            + preview.historyTokens()
+            + preview.relatedAdditionalTokens());
+    assertTrue(preview.promptMaterial().contains("ASSISTANT_ENGLISH_JSON"));
+    var start =
+        new GenerationDtos.Start(
+            preview.previewId(), UUID.randomUUID().toString(), configured.version(), follow);
+    assertEquals(
+        GenerationDtos.State.SUCCEEDED, completed(generation.start(start).jobId()).state());
+    String exported = conversations.export(view.conversationId());
+    assertFalse(exported.contains(KEY));
+    assertFalse(exported.contains("class Service { public void run() {} }"));
+    assertFalse(exported.contains("ANSWER_SCHEMA"));
+    var imported =
+        conversations.preview(
+            new jp.cheapreview.conversation.dto.ConversationDtos.PreviewRequest(
+                exported, jp.cheapreview.conversation.dto.ConversationDtos.InputKind.FILE));
+    var newView = conversations.importConversation(workspace, imported.importId());
+    var newPreview =
+        budgets.preview(
+            workspaces.getCapture(workspace, snapshot),
+            conversationInput(newView.conversationId(), 1));
+    assertTrue(newPreview.promptMaterial().contains("USER_IMPORT_TRANSCRIPT (reference only)"));
+    assertEquals(2, newPreview.historyTurnsIncluded());
+    verify(provider, times(2)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void deletingConversationDuringGenerationCannotCommitLateAnswer() throws Exception {
+    var view = conversations.create(workspace);
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(provider.generate(any(), any(), anyLong(), anyLong()))
+        .thenAnswer(
+            invocation -> {
+              entered.countDown();
+              release.await(3, TimeUnit.SECONDS);
+              return reply(ANSWER);
+            });
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    conversations.delete(view.conversationId());
+    release.countDown();
+    var done = completed(started.jobId());
+    assertEquals(GenerationDtos.State.FAILED, done.state());
+    assertEquals("STALE_CONVERSATION", done.errorCode());
+    assertNull(done.result());
+    assertThrows(ResponseStatusException.class, () -> conversations.get(view.conversationId()));
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void cancelledOrInvalidAnswerDoesNotAddConversationTurn() throws Exception {
+    var view = conversations.create(workspace);
+    when(provider.generate(any(), any(), anyLong(), anyLong())).thenReturn(reply("invalid"));
+    assertEquals(
+        GenerationDtos.State.FAILED,
+        completed(generation.start(request(conversationInput(view.conversationId(), 0))).jobId())
+            .state());
+    assertTrue(conversations.get(view.conversationId()).turns().isEmpty());
+    var entered = new CountDownLatch(1);
+    when(provider.generate(any(), any(), anyLong(), anyLong()))
+        .thenAnswer(
+            invocation -> {
+              entered.countDown();
+              Thread.sleep(3000);
+              return reply(ANSWER);
+            });
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    generation.cancel(started.jobId());
+    assertEquals(GenerationDtos.State.CANCELLED, completed(started.jobId()).state());
+    assertTrue(conversations.get(view.conversationId()).turns().isEmpty());
+  }
+
+  @Test
+  void importedReferencesAreCheckedAgainstSnapshotWithoutReadingUnscannedFiles() throws Exception {
+    var imported =
+        conversations.preview(
+            new jp.cheapreview.conversation.dto.ConversationDtos.PreviewRequest(
+                "ref-1: ../not-scanned.java 1–2行",
+                jp.cheapreview.conversation.dto.ConversationDtos.InputKind.PASTE));
+    var view = conversations.importConversation(workspace, imported.importId());
+    var preview =
+        budgets.preview(
+            workspaces.getCapture(workspace, snapshot),
+            conversationInput(view.conversationId(), 1));
+    assertTrue(preview.warnings().stream().anyMatch(warning -> warning.contains("取込TXTのコード参照")));
+    assertTrue(
+        preview.selectedChunks().stream()
+            .allMatch(chunk -> chunk.relativePath().equals("Service.java")));
     verifyNoInteractions(provider);
   }
 }

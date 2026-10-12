@@ -1,6 +1,23 @@
 import { ApiFailure } from "./client";
 
 const messages: Record<string, string> = {
+  EXPORT_REQUIRES_REVIEW:
+    "TXTの質問・回答に絶対フォルダパスが含まれます。保存内容を見直してください。秘密情報の完全な自動検出は保証しません。",
+  INVALID_TRANSCRIPT:
+    "TXTのヘッダー・USER/ASSISTANT順序・空本文・UTF-8形式を確認してください。元の本文は保持しています。",
+  IMPORT_TOO_LARGE:
+    "取込上限はファイル1MiB・本文100,000文字・20往復、JSON本文2MiBです。元の本文を短くしてください。",
+  STALE_IMPORT:
+    "引継ぎプレビューの5分期限が切れたか使用済みです。再プレビューしてください。",
+  HISTORY_TOO_LARGE:
+    "最新の履歴または引継ぎメモが入力予算の25%枠・安全余裕に収まりません。予算を増やすか、新しい会話・短いメモへ変更してください。",
+  STALE_CONVERSATION: "会話が変更されています。概算を更新してください。",
+  CONVERSATION_NOT_FOUND:
+    "会話が破棄・期限切れです。新しい会話を開始してください。",
+  CONVERSATION_WORKSPACE_MISMATCH:
+    "この会話は別フォルダのものです。現在のフォルダで新しい会話を開始してください。",
+  CONVERSATION_LIMIT: "保持会話数の上限です。不要な会話を破棄してください。",
+  IMPORT_LIMIT: "引継ぎプレビュー数の上限です。5分後に再確認してください。",
   DEMO_NOT_CONFIGURED:
     "デモ用ローカル設定がありません。.envを用意し、デモ設定のパスを指定して起動してください。",
   INVALID_DEMO_CONFIG:
