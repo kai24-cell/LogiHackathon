@@ -2,20 +2,21 @@
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
-    # Archive tracked source only, so untracked user code and credentials cannot enter.
+    # ソースと成果物を同じcommitに揃える。利用者の未コミット変更は破棄しない。
     $changes = git status --porcelain
+    if ($LASTEXITCODE -ne 0) { throw 'Gitの状態を確認できませんでした。' }
     if ($changes) { throw '変更を確認・コミットしてからZIPを作成してください。' }
-    New-Item -ItemType Directory -Force dist | Out-Null
-    git archive --format=zip --output=dist/cheapreview-source.zip HEAD
-    if ($LASTEXITCODE -ne 0) { throw 'git archive failed' }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zip = [System.IO.Compression.ZipFile]::Open((Join-Path $root 'dist/cheapreview-source.zip'), 'Update')
-    try {
-        foreach ($name in @('cheapreview-0.1.0.jar', 'cheapreview-0.1.0.vsix')) {
-            $path = Join-Path $root "dist/$name"
-            if (!(Test-Path -LiteralPath $path)) { throw '先にbuild.ps1を実行してください。' }
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $path, "dist/$name") | Out-Null
-        }
-    } finally { $zip.Dispose() }
-    Write-Host 'dist/cheapreview-source.zipを作成しました。提出前に内容を確認してください。'
+    $sourceCommit = git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Gitのcommitを確認できませんでした。' }
+    & (Join-Path $PSScriptRoot 'build.ps1')
+    $afterCommit = git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Gitのcommitを確認できませんでした。' }
+    $afterChanges = git status --porcelain
+    if ($LASTEXITCODE -ne 0 -or $afterChanges -or $sourceCommit -ne $afterCommit) {
+        throw 'ビルド中にソースが変わりました。確認して再実行してください。'
+    }
+    # 以前のjar/VSIXを最新の証拠にせず、今回のbuild成功後だけ梱包する。
+    python (Join-Path $PSScriptRoot 'package_distribution.py')
+    if ($LASTEXITCODE -ne 0) { throw 'ZIPの安全検査または作成に失敗しました。' }
+    Write-Host 'dist/cheapreview-source.zipを作成・検査しました。実操作の確認は導入ガイドに従ってください。'
 } finally { Pop-Location }
