@@ -72,4 +72,10 @@ public class GenerationController {
   public GenerationDtos.Job cancel(@PathVariable String id) {
     return generation.cancel(id);
   }
+
+  @PostMapping("/jobs/{id}/translate")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public GenerationDtos.Started translate(@PathVariable String id) {
+    return generation.translate(id);
+  }
 }

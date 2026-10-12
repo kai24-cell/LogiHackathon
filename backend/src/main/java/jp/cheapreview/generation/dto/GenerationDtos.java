@@ -3,6 +3,7 @@ package jp.cheapreview.generation.dto;
 import java.time.Instant;
 import java.util.List;
 import jp.cheapreview.budget.dto.BudgetPreview;
+import jp.cheapreview.translation.dto.TranslationDtos;
 
 /** 翻訳・会話の後続処理でも英語回答と参照表を再利用できる型付き契約。 */
 public final class GenerationDtos {
@@ -17,6 +18,8 @@ public final class GenerationDtos {
     QUEUED,
     SCANNING,
     GENERATING,
+    TRANSLATING,
+    TRANSLATION_FAILED,
     SUCCEEDED,
     FAILED,
     CANCELLED
@@ -121,7 +124,18 @@ public final class GenerationDtos {
       String errorCode,
       Result result,
       Instant createdAt,
-      ErrorDetails errorDetails) {
+      ErrorDetails errorDetails,
+      TranslationDtos.Result translation) {
+    public Job(
+        String jobId,
+        State state,
+        String errorCode,
+        Result result,
+        Instant createdAt,
+        ErrorDetails errorDetails) {
+      this(jobId, state, errorCode, result, createdAt, errorDetails, null);
+    }
+
     public Job(String jobId, State state, String errorCode, Result result, Instant createdAt) {
       this(jobId, state, errorCode, result, createdAt, null);
     }

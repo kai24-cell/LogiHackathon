@@ -255,12 +255,12 @@ Git管理対象に実キー・認証JSONを入れないでください。作成�
 - 検索索引の保持数は初期値1、質問はバックエンドで10,000 code pointsを上限とします。設定ファイルは走査済みファイル名だけを索引化し、本文を追加読込しません。FQNや語彙が一致しない参照・構文解析失敗の限界は検索結果に表示します。
 - PR #12の修正では、名前で指定したレシーバの有効な宣言と明示importを、SymbolSolverの解決済み結果にも照合します。未解決の宣言を同名の別変数・型へ置き換えません。ラムダ・for・catchなどのスコープとimport優先順位を回帰テストで確認します。
 - FQNを持たないローカル型のIDは、包含する型・メソッド署名と同名ローカル宣言の順序を補助情報にします。同一行でも別宣言を区別し、改行・本文だけの変更ではIDを維持します。同名宣言の追加・並べ替えではIDが変わり得るため、異なるsnapshotの参照は混ぜません。
-- 今回は初期構築・ブリッジ・ファイル走査・Java解析・4観点による関連コード検索・予算内の送信材料previewまでです。CURRENT_FILE/OPEN_REFERENCE、生成・翻訳、会話TXT、第16章の完成デモと比較実験は後続です。第21章を任意機能へ変更していません。
+- 初期構築・ブリッジ・ファイル走査・Java解析・4観点による関連コード検索・予算preview・構造化英語生成・説明文字列の翻訳を実装しています。CURRENT_FILE/OPEN_REFERENCE、会話TXT、第16章の完成デモと比較実験は後続です。翻訳の実API・実ブラウザ受入は未確認です。第21章を任意機能へ変更していません。
 - Issue #4の結果確認用にsnapshotを明示する同期GET APIとWebの「Java解析」を追加しました。生成用のpreview/job APIは後続です。JavaParserTypeSolverのキャッシュは走査済み原文から構築し、ライブラリの通常のディスク再読込を遮断します。変更後ファイル・除外ファイル・複数ソースルートをテストします。
 - ファイル一覧は相対パス順のチェックリストです。階層ツリーは後続で拡張します。
 - 詳細設計8.1の対象ファイル10,000件上限と別に、訪問数100,000件の暫定上限を設けます。通常のフォルダ・対象外ファイルが対象ファイル枠を消費しないようにしつつ、大量の対象外項目や空フォルダの走査を制限します。両方の境界と警告をテストします。
 - 接続が一時的に切れても登録済みワークスペースはアプリ終了まで保持します。再接続時は旧フォルダ要求を破棄し、古いbridgeIdの結果を拒否します。
-- この段階のVSIXはdistから手動インストールします。Web内のVSIXダウンロードと生成・翻訳設定画面は後続です。
+- VSIXはdistから手動インストールします。Gemini認証設定と翻訳設定状態はWebで確認でき、翻訳認証ファイルはバックエンド起動環境だけで設定します。Web内のVSIXダウンロードは後続です。
 - 検証用の一時JDK・依存キャッシュは `.tools/`・`.cache/` に置き、Git/ZIPから除外します。OS全体の設定は変更しません。
 - 固定依存のRollup 4.64.0では不要コード除去の処理が長時間CPUを占有しました。CPUプロファイルでeffect解析・include処理を確認し、`build.rollupOptions.treeshake=false` にするとWebビルドが1.65秒で完了しました。ローカル配信の初期構築ではこの最適化を無効にします。minifyは有効のままで、JS出力は約192kBです。
 
@@ -306,8 +306,8 @@ APIキー・質問・コード・生応答・子プロセスのログは検証�
 API提供のusageと独自推定値は区別し、未知料金を無料として扱いません。
 CIでは固定providerの3ケースのみ実行し、実API用のフラグや認証情報を使いません。
 
-翻訳は#8で実装します。`CHEAPREVIEW_GCP_PROJECT`と`GOOGLE_APPLICATION_CREDENTIALS`は予約設定で、
-今回は空欄で構いません。認証JSONは読みません。日本語期待fixtureは翻訳実績ではありません。
+翻訳認証が未設定でも英語回答を保持します。固定応答モードでは翻訳も外部APIを呼びません。
+日本語期待fixtureやstubの翻訳は実APIでの翻訳実績ではありません。
 検証結果・設計との差分は`docs/issue14-validation.md`を参照してください。
 
 2026-10-12に`gemini-3.8-flash`で通常アプリ経路の実生成1回が成功し、予算・回答schema・参照・実usageを確認しました。
@@ -325,3 +325,43 @@ CONNECTはJavaが明示した接続タイムアウト、RESPONSE_WAITはヘッ�
 RESPONSE_WAITだけで接続・モデル・利用上限の原因を断定しません。URL・モデルID・キー・認証ヘッダー・質問・送信コード・回答本文・例外メッセージは診断ログへ出しません。
 `verify_api.ps1`はこの固定形式だけを表示し、任意のバックエンドログは破棄します。画面とジョブ取得APIでも段階・タイムアウト種別・経過時間を確認できます。
 診断読取の回帰テストは`python -m unittest discover -s scripts/tests -p "test_*.py"`で実行します。読取障害は生例外を出さず`LOCAL_DIAGNOSTIC_ERROR`になり、CIでも外部通信なしで検証します。
+
+## 英語回答の日本語翻訳（Issue #8）
+
+通常生成の回答schema・参照検証を通した英語回答から、summary、sectionsのtitle/body、findingsのtitle/explanation/suggestion、limitationsだけを翻訳します。
+code、severity、参照IDは送信せず原文を保持し、説明中の送信済みコードのsymbol・相対パス・バッククォート区間はplaceholderへ置換して復元を検証します。
+「英語原文を表示」で元の説明を確認できます。翻訳未設定・失敗では英語原文と未翻訳箇所を表示し、「再翻訳（Geminiは再実行しません）」は同じ保存済み回答だけを処理します。
+英語回答はbackendメモリに保持し、アプリ終了後の復元は行いません。
+
+実翻訳を使う場合は、GCPプロジェクトでCloud Translation APIと課金を有効化し、専用service accountに`roles/cloudtranslate.user`を付与してください。
+認証JSONはリポジトリ外へ置き、**バックエンドを起動するPowerShellの環境**に次の設定を追加します。
+値・認証ファイルの内容は共有しないでください。
+
+```powershell
+$env:CHEAPREVIEW_GCP_PROJECT = '<GCP project ID>'
+$env:GOOGLE_APPLICATION_CREDENTIALS = '<リポジトリ外のservice-account JSONの絶対パス>'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1
+```
+
+`.env`の予約項目に記入するだけでは翻訳に反映しません。`start.ps1`を起動する親PowerShellの環境がSpringへ継承されます。
+画面の「翻訳認証設定あり」は設定の有無だけを示し、有効性・疎通・課金を保証しません。資格情報を読むのは生成後の翻訳または明示の再翻訳時だけです。
+認証未設定時はADCのホームディレクトリ探索・metadata通信を行いません。今回の実装は明示service-account JSONに対応し、認証JSON・token・送信説明・翻訳本文をログや配布物へ含めません。
+
+Cloud Translation Advanced v3の`projects/{project}/locations/global:translateText`で`en`→`ja`、`text/plain`を使います。
+1リクエストの暫定上限10,000 Unicode code points、contents最大1,024件です。1回の翻訳試行は認証取得・全batch・限定retryを含む共通30秒期限です。
+長い説明は文・段落の境界で分け、安全に分けられない説明は英語のまま残します。429/503のみ1秒待機して最大1回再試行し、それ以外やtimeoutは再送しません。
+生成の240秒期限は英語検証完了時に解除し、翻訳の失敗で取得済み回答・実usageを失わないようにしています。
+英語検証後は「翻訳だけ中止」で取得済み回答とusageを保持して翻訳を止められます。中止後のbatchは送らず、遅延結果で表示を上書きしません。再翻訳はtranslationAttemptを増やして完了済みジョブ状態を巻き戻しません。
+
+公式確認日：2026-10-12。
+[REST契約](https://docs.cloud.google.com/translate/docs/reference/rest/v3/projects/translateText)、
+[認証](https://docs.cloud.google.com/translate/docs/authentication)、
+[IAM](https://docs.cloud.google.com/translate/docs/access-control)を確認しました。
+Google認証ライブラリは安定版`google-auth-library-oauth2-http:1.43.0`を固定し、Java 21で検証しています。
+翻訳料金・無料枠・実請求額は今回未確認で、生成の概算額には含みません。実翻訳は別料金が発生し得ます。
+検証結果と制約は[Issue #8検証記録](docs/issue08-validation.md)を参照してください。
+
+Design deviations（Issue #8）：任意ADCファイルの自動探索を避け、明示service-account JSONに限定します。
+未設定時の外部通信を防ぎ、CIでは実認証を使用しないためです。英語回答の保持・表示用翻訳分離・再翻訳のGemini非呼出は最新詳細設計を維持しています。
+翻訳timeout30秒は全batch・認証・限定retryで共通の枠として適用します。大量batchの障害で次の操作が塞がり続けることを防ぐためで、期限到達時も完了済み説明の訳と残りの英語を保持します。
+通信の取消は外部課金の取消やOAuth SDK内部処理の即時停止を保証しません。割込みに応答しない認証stubでも呼出側と後続要求が期限内に戻ることを検証しています。

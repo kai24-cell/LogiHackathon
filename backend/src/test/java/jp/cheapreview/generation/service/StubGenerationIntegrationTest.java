@@ -79,8 +79,10 @@ class StubGenerationIntegrationTest {
       if (System.nanoTime() > deadline) fail("Generation timeout");
       Thread.sleep(10);
     } while (job.state() == GenerationDtos.State.QUEUED
-        || job.state() == GenerationDtos.State.GENERATING);
-    assertEquals(GenerationDtos.State.SUCCEEDED, job.state());
+        || job.state() == GenerationDtos.State.GENERATING
+        || job.state() == GenerationDtos.State.TRANSLATING);
+    assertEquals(GenerationDtos.State.TRANSLATION_FAILED, job.state());
+    assertEquals("TRANSLATION_NOT_READY", job.translation().errorCode());
     assertEquals(SettingsDtos.Source.STUB, job.result().source());
     assertEquals(
         List.of("ref-1"), job.result().answerEnglish().sections().getFirst().referenceIds());

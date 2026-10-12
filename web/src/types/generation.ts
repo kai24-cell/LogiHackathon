@@ -34,7 +34,23 @@ export interface EnglishAnswer {
 }
 export interface GenerationJob {
   jobId: string;
-  state: "QUEUED" | "GENERATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  state:
+    | "QUEUED"
+    | "GENERATING"
+    | "TRANSLATING"
+    | "TRANSLATION_FAILED"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED";
+  translation?: {
+    displayAnswer: EnglishAnswer;
+    partialTranslation: boolean;
+    warnings: { field: string; code: string }[];
+    attempt: number;
+    durationMs: number;
+    status: "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED";
+    errorCode: string | null;
+  } | null;
   errorCode: string | null;
   errorDetails?: {
     httpStatus: number | null;
