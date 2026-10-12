@@ -1,4 +1,6 @@
-﻿param([switch]$Dev, [switch]$NoBrowser)
+﻿param([switch]$Dev, [switch]$NoBrowser, [switch]$Stub, [switch]$Demo,
+    [ValidateSet('normal', 'invalid', 'timeout')][string]$Scenario = 'normal')
+if ($Stub -and $Demo) { throw 'StubとDemoは同時に指定できません。' }
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $backendPort = 8765
@@ -35,7 +37,10 @@ try {
     $env:CHEAPREVIEW_DEV_ORIGIN = if ($Dev) { "http://127.0.0.1:$developmentPort" } else { '' }
     @{ port = $backendPort; token = $token; protocolVersion = '1' } |
         ConvertTo-Json | Set-Content -LiteralPath $runtimePath -Encoding UTF8
-    $process = Start-Process -FilePath 'java' -ArgumentList @('-jar', ('"' + $jar + '"')) -WindowStyle Hidden -PassThru
+    $arguments = @('-jar', ('"' + $jar + '"'))
+    if ($Stub) { $arguments += @('--cheapreview.generation.provider=stub', "--cheapreview.stub.scenario=$Scenario") }
+    if ($Demo) { $arguments += ('"--cheapreview.demo.config-path=' + (Join-Path $root '.env') + '"') }
+    $process = Start-Process -FilePath 'java' -ArgumentList $arguments -WindowStyle Hidden -PassThru
     $ready = $false
     for ($attempt = 0; $attempt -lt $startupAttempts; $attempt++) {
         if ($process.HasExited) { throw 'バックエンドの起動に失敗しました。' }

@@ -228,7 +228,12 @@ export function BudgetPanel({
           予算と有効性を確認しました。外部APIへの送信は行っていません。
         </p>
       )}
-      <GenerationPanel input={input} preview={result} busy={busy} />
+      <GenerationPanel
+        input={input}
+        preview={result}
+        busy={busy}
+        onModelConfigured={setModelId}
+      />
     </section>
   );
 }

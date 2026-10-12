@@ -1,0 +1,1 @@
+{"question":"OrderServiceで注文作成の数量検証と保存がどの順序で行われ、数量が不正な場合どうなるか説明してください。","mode":"SERVICE_REVIEW","selectedFiles":["OrderService.java"],"expectedRelatedFiles":["OrderService.java","OrderRepository.java"],"inputBudgetTokens":8192}

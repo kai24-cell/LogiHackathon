@@ -12,4 +12,18 @@ class SecretRedactionTest {
     assertEquals(raw, SecretRedaction.redact(raw, null));
     assertEquals(raw, SecretRedaction.redact(raw, ""));
   }
+
+  @Test
+  void opaqueKeyPunctuationIsRedactedInJsonAndLiteralText() throws Exception {
+    String key = "fixture.+/=\"\\";
+    String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(key);
+    assertEquals("\"[REDACTED]\"", SecretRedaction.redact(json, key));
+    assertEquals("[REDACTED]", SecretRedaction.redact(key, key));
+  }
+
+  @Test
+  void maximumAcceptedKeyLengthCanBeRedacted() {
+    String key = "x".repeat(4096);
+    assertEquals("[REDACTED]", SecretRedaction.redact(key, key));
+  }
 }

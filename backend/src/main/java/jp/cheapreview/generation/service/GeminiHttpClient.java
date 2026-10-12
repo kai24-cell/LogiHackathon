@@ -18,10 +18,15 @@ import jp.cheapreview.budget.service.PromptMaterializer;
 import jp.cheapreview.generation.dto.GenerationDtos.Usage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /** 固定HTTPS宛先へ1回だけ送信する。認証はヘッダー、redirectと自動再試行は無効。 */
 @Component
+@ConditionalOnProperty(
+    name = "cheapreview.generation.provider",
+    havingValue = "real",
+    matchIfMissing = true)
 public class GeminiHttpClient implements GeminiClient {
   private static final int MAX_RESPONSE_BYTES = 1_048_576;
   private final ObjectMapper mapper;
@@ -74,9 +79,13 @@ public class GeminiHttpClient implements GeminiClient {
     body.set("systemInstruction", content(prompt.system(), false));
     body.putArray("contents").add(content(prompt.contents(), true));
     var config = body.putObject("generationConfig");
-    config.put("temperature", 0.2);
+    // Gemini 3の移行仕様ではsampling設定が非推奨、candidateCountが非対応。
+    // thinkingは未指定のモデル既定値を使い、旧モデルの送信条件は維持する。
+    if (!model.startsWith("gemini-3.")) {
+      config.put("temperature", 0.2);
+      config.put("candidateCount", 1);
+    }
     config.put("maxOutputTokens", maximumOutputTokens);
-    config.put("candidateCount", 1);
     config.put("responseMimeType", "application/json");
     try {
       config.set("responseJsonSchema", mapper.readTree(prompt.schema()));
@@ -97,6 +106,11 @@ public class GeminiHttpClient implements GeminiClient {
 
   /** 生のHTTPエラーはキーやコードを含み得るため、固定コードへ変換して破棄する。 */
   private JsonNode exchange(String path, String body, String key) {
+    var diagnostic =
+        new GenerationDiagnostics(
+            body == null
+                ? jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO
+                : jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE);
     try {
       var builder =
           HttpRequest.newBuilder(base.resolve(path))
@@ -105,27 +119,47 @@ public class GeminiHttpClient implements GeminiClient {
               .header("Content-Type", "application/json");
       if (body == null) builder.GET();
       else builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-      var pending = http.sendAsync(builder.build(), ignored -> new LimitedBody());
+      var pending =
+          http.sendAsync(
+              builder.build(),
+              info -> {
+                // 本文の停止時も、すでに到着したHTTPステータスを失わない。
+                diagnostic.headers(info.statusCode());
+                return new LimitedBody();
+              });
       HttpResponse<String> response;
       try {
         // ヘッダー到着後にbodyが停止する場合も、通信全体へtimeoutを適用する。
         response = pending.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
       } catch (java.util.concurrent.TimeoutException exception) {
         pending.cancel(true);
-        throw new GenerationFailure("GENERATION_TIMEOUT");
+        throw diagnostic.timeout(
+            jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT);
       } catch (InterruptedException exception) {
         pending.cancel(true);
         throw exception;
       } catch (java.util.concurrent.ExecutionException exception) {
         if (exception.getCause() instanceof java.net.http.HttpTimeoutException)
-          throw new GenerationFailure("GENERATION_TIMEOUT");
+          throw diagnostic.timeout(GenerationDiagnostics.classifyTimeout(exception.getCause()));
         throw new GenerationFailure("GEMINI_UNAVAILABLE");
       }
       int status = response.statusCode();
-      if (status == 401 || status == 403) throw new GenerationFailure("GEMINI_AUTH_FAILED");
-      if (status == 429) throw new GenerationFailure("GEMINI_RATE_LIMITED");
-      if (status == 400 || status == 404) throw new GenerationFailure("MODEL_UNSUPPORTED");
-      if (status < 200 || status >= 300) throw new GenerationFailure("GEMINI_UNAVAILABLE");
+      if (status < 200 || status >= 300) {
+        // 任意のエラーメッセージは残さない。JSONでない失敗でもHTTP数値を保持する。
+        JsonNode error;
+        try {
+          error = mapper.readTree(response.body());
+        } catch (Exception exception) {
+          error = mapper.createObjectNode();
+        }
+        if (error == null) error = mapper.createObjectNode();
+        throw GeminiErrorClassifier.classify(
+            status,
+            error,
+            body == null
+                ? jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO
+                : jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE);
+      }
       return mapper.readTree(response.body());
     } catch (GenerationFailure failure) {
       throw failure;
@@ -134,6 +168,8 @@ public class GeminiHttpClient implements GeminiClient {
       throw new GenerationFailure("CANCELLED");
     } catch (Exception exception) {
       throw new GenerationFailure("GEMINI_UNAVAILABLE");
+    } finally {
+      diagnostic.end();
     }
   }
 

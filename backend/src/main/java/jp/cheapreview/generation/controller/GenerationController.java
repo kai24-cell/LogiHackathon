@@ -42,6 +42,16 @@ public class GenerationController {
     return settings.status();
   }
 
+  @PostMapping("/settings/demo")
+  public SettingsDtos.Status demo() {
+    return settings.useDemo();
+  }
+
+  @PostMapping("/settings/stub")
+  public SettingsDtos.Status stub() {
+    return settings.useStub();
+  }
+
   @PostMapping("/analysis/jobs")
   @ResponseStatus(HttpStatus.ACCEPTED)
   public GenerationDtos.Started start(@RequestBody GenerationDtos.Start request) {
@@ -61,5 +71,11 @@ public class GenerationController {
   @PostMapping("/jobs/{id}/cancel")
   public GenerationDtos.Job cancel(@PathVariable String id) {
     return generation.cancel(id);
+  }
+
+  @PostMapping("/jobs/{id}/translate")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public GenerationDtos.Started translate(@PathVariable String id) {
+    return generation.translate(id);
   }
 }
