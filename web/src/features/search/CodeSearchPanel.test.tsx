@@ -7,6 +7,38 @@ import {
 } from "./CodeSearchPanel";
 import type { CodeSearchResult } from "../../types/search";
 
+function candidateResult(count: number): CodeSearchResult {
+  return {
+    snapshotId: "snapshot",
+    mode: "SERVICE_REVIEW",
+    formulaVersion: "test",
+    documentCount: count,
+    weights: { cosine: 0.5, dependency: 0.3, roleFit: 0.2 },
+    warnings: [],
+    candidates: Array.from({ length: count }, (_, index) => ({
+      rank: index + 1,
+      fileId: `file-${index}`,
+      relativePath: `Candidate${index + 1}.java`,
+      primarySelected: index === 0,
+      dependencyDistance: 1,
+      bestMethodId: `method-${index}`,
+      beginLine: 10,
+      roles: ["Service"],
+      matchingTerms: [],
+      reasons: [`選定理由${index + 1}`],
+      score: {
+        cosine: 0,
+        dependency: 1,
+        roleFit: 1,
+        cosineContribution: 0,
+        dependencyContribution: 0.3,
+        roleContribution: 0.2,
+        total: 0.5,
+      },
+    })),
+  };
+}
+
 describe("関連コード検索", () => {
   it("質問の原文を保持し、主選択の順序を固定して空白質問を拒否する", () => {
     expect(
@@ -82,5 +114,50 @@ describe("関連コード検索", () => {
     );
     expect(html).toContain("disabled");
     expect(html).toContain("翻訳せず検索");
+    expect(html).toContain("<details><summary>検索の仕組みと制限</summary>");
+    expect(html).toContain('class="question-composer"');
+    expect(html).toContain('class="question-input"');
+  });
+
+  it("上位3候補だけを既定表示し、残りの順位・理由・スコアを折り畳み内に保持する", () => {
+    const result = candidateResult(5);
+    const original = JSON.stringify(result);
+    const html = renderToStaticMarkup(<SearchResult result={result} />);
+    const tables = html.match(/<table>[\s\S]*?<\/table>/g) ?? [];
+
+    expect(tables).toHaveLength(2);
+    expect(tables[0]).toContain("Candidate3.java");
+    expect(tables[0]).not.toContain("Candidate4.java");
+    expect(html).toContain("その他の関連ファイル（2件）");
+    expect(html).toContain(
+      '<details open=""><summary>関連ファイル候補（5件）</summary>',
+    );
+    expect(html).toContain(
+      "<details><summary>その他の関連ファイル（2件）</summary>",
+    );
+    expect(tables[1]).toContain("<td>4</td>");
+    expect(tables[1]).toContain("<td>5</td>");
+    expect(tables[1].indexOf("Candidate4.java")).toBeLessThan(
+      tables[1].indexOf("Candidate5.java"),
+    );
+    expect(tables[1]).toContain("選定理由4");
+    expect(tables[1]).toContain("0.5000");
+    expect(JSON.stringify(result)).toBe(original);
+  });
+
+  it("3件以下は追加候補の折り畳みを表示しない", () => {
+    const html = renderToStaticMarkup(
+      <SearchResult result={candidateResult(3)} />,
+    );
+    expect(html).not.toContain("その他の関連ファイル（");
+    expect(html.match(/<table>/g)).toHaveLength(1);
+  });
+
+  it("0件は候補なしを表示し、追加候補の折り畳みを表示しない", () => {
+    const html = renderToStaticMarkup(
+      <SearchResult result={candidateResult(0)} />,
+    );
+    expect(html).toContain("走査済みの検索候補がありません");
+    expect(html).not.toContain("その他の関連ファイル（");
   });
 });

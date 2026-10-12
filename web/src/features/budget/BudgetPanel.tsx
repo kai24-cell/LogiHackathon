@@ -18,6 +18,8 @@ import {
   type ConversationView,
 } from "../conversation/ConversationPanel";
 
+export type ReviewSection = "generate" | "budget" | "translation" | "handoff";
+
 const PREVIEW_DELAY_MS = 300;
 
 /** 入力変更をdebounceし、計算中・期限切れ・入力違いの結果では確認操作を許可しない。 */
@@ -28,6 +30,7 @@ export function BudgetPanel({
   mode,
   selected,
   busy,
+  activeSection,
 }: {
   workspaceId: string;
   snapshotId: string;
@@ -35,6 +38,7 @@ export function BudgetPanel({
   mode: SearchMode;
   selected: ReadonlySet<string>;
   busy: boolean;
+  activeSection?: ReviewSection;
 }) {
   const [conversation, setConversation] = useState<ConversationView>();
   const [conversationRefresh, setConversationRefresh] = useState(0);
@@ -162,91 +166,103 @@ export function BudgetPanel({
 
   return (
     <section>
-      <h2>概算と送信コードの組み立て</h2>
-      <p>
-        入力予算はtokensの上限です。概算ちょうどでは不足し、安全余裕が必要です。費用の上限を保証しません。APIキー不要・外部API呼出なし。
-      </p>
-      <label>
-        入力トークン予算（tokens）
-        <input
-          type="number"
-          min={1024}
-          max={100000}
-          step={1}
-          value={budget}
-          onChange={(event) => setBudget(event.target.value)}
-        />
-      </label>
-      <label>
-        モデルID（料金設定のキー）
-        <input
-          type="text"
-          autoComplete="off"
-          value={modelId}
-          onChange={(event) => setModelId(event.target.value)}
-        />
-      </label>
-      {mode === "CLASS_EXPLAIN" && (
-        <label>
-          説明対象の主選択ファイル
-          <select
-            value={input.targetFileId ?? ""}
-            onChange={(event) => setTargetFile(event.target.value)}
-          >
-            {[...selected].sort().map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <label>
-        必須メソッドID（任意）
-        <input
-          value={targetMethod}
-          onChange={(event) => setTargetMethod(event.target.value)}
-        />
-      </label>
-      {!validInput(input) && (
+      {/* 表示だけを切り替え、概算・会話・生成の状態と監視を維持する。 */}
+      <div
+        data-pane="budget"
+        hidden={activeSection !== undefined && activeSection !== "budget"}
+      >
+        <h2>概算と送信コードの組み立て</h2>
         <p>
-          質問（4,000文字以内）、主選択1〜100件、モデルID、整数予算1,024〜100,000を指定してください。
+          入力予算はtokensの上限です。概算ちょうどでは不足し、安全余裕が必要です。費用の上限を保証しません。APIキー不要・外部API呼出なし。
         </p>
-      )}
-      {validInput(input) && !result && !error && (
-        <p role="status">概算計算中または旧結果が無効です。</p>
-      )}
-      {error && <p role="alert">{error}</p>}
-      <button
-        disabled={!validInput(input) || busy}
-        onClick={() => {
-          setCompleted(undefined);
-          setVerifiedKey("");
-          setError("");
-          setRefresh((value) => value + 1);
-        }}
+        <label>
+          入力トークン予算（tokens）
+          <input
+            type="number"
+            min={1024}
+            max={100000}
+            step={1}
+            value={budget}
+            onChange={(event) => setBudget(event.target.value)}
+          />
+        </label>
+        <label>
+          モデルID（料金設定のキー）
+          <input
+            type="text"
+            autoComplete="off"
+            value={modelId}
+            onChange={(event) => setModelId(event.target.value)}
+          />
+        </label>
+        {mode === "CLASS_EXPLAIN" && (
+          <label>
+            説明対象の主選択ファイル
+            <select
+              value={input.targetFileId ?? ""}
+              onChange={(event) => setTargetFile(event.target.value)}
+            >
+              {[...selected].sort().map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          必須メソッドID（任意）
+          <input
+            value={targetMethod}
+            onChange={(event) => setTargetMethod(event.target.value)}
+          />
+        </label>
+        {!validInput(input) && (
+          <p>
+            質問（4,000文字以内）、主選択1〜100件、モデルID、整数予算1,024〜100,000を指定してください。
+          </p>
+        )}
+        {validInput(input) && !result && !error && (
+          <p role="status">概算計算中または旧結果が無効です。</p>
+        )}
+        {error && <p role="alert">{error}</p>}
+        <button
+          disabled={!validInput(input) || busy}
+          onClick={() => {
+            setCompleted(undefined);
+            setVerifiedKey("");
+            setError("");
+            setRefresh((value) => value + 1);
+          }}
+        >
+          概算を更新
+        </button>
+        {result && <BudgetSummary result={result} />}
+        <button
+          disabled={!result?.canExecute || checking || busy}
+          onClick={() => void checkAssembly()}
+        >
+          {checking ? "再検証中…" : "組み立て結果をバックエンドで再検証"}
+        </button>
+        {result && verifiedKey === key + result.previewId && (
+          <p role="status">
+            予算と有効性を確認しました。外部APIへの送信は行っていません。
+          </p>
+        )}
+      </div>
+      <div
+        data-pane="handoff"
+        hidden={activeSection !== undefined && activeSection !== "handoff"}
       >
-        概算を更新
-      </button>
-      {result && <BudgetSummary result={result} />}
-      <button
-        disabled={!result?.canExecute || checking || busy}
-        onClick={() => void checkAssembly()}
-      >
-        {checking ? "再検証中…" : "組み立て結果をバックエンドで再検証"}
-      </button>
-      {result && verifiedKey === key + result.previewId && (
-        <p role="status">
-          予算と有効性を確認しました。外部APIへの送信は行っていません。
-        </p>
-      )}
-      <ConversationPanel
-        workspaceId={workspaceId}
-        view={conversation}
-        onChange={setConversation}
-        refresh={conversationRefresh}
-      />
+        <ConversationPanel
+          workspaceId={workspaceId}
+          view={conversation}
+          onChange={setConversation}
+          refresh={conversationRefresh}
+        />
+      </div>
       <GenerationPanel
+        activeSection={activeSection}
         input={input}
         preview={result}
         busy={busy || !conversation || conversation.workspaceId !== workspaceId}
@@ -290,29 +306,31 @@ export function BudgetSummary({ result }: { result: BudgetResult }) {
           {warning}
         </p>
       ))}
-      {result.selectedChunks.map((chunk) => (
-        <details key={chunk.fileId}>
-          <summary>
-            {chunk.relativePath} {chunk.mandatory ? "主選択・必須" : "関連追加"}
-          </summary>
-          <p>{chunk.reasons.join(" / ")}</p>
-          <p>本文保持メソッド: {chunk.methodIds.join(", ") || "なし"}</p>
-          <p>
-            省略行:{" "}
-            {chunk.omittedRanges
-              .map((range) => `${range.beginLine}–${range.endLine}`)
-              .join(", ") || "なし"}
-          </p>
-          <pre>{chunk.code}</pre>
-        </details>
+      {result.selectedChunks.slice(0, 3).map((chunk) => (
+        <SelectedChunk key={chunk.fileId} chunk={chunk} />
       ))}
-      <ul>
-        {result.excludedCandidates.map((candidate) => (
-          <li key={candidate.fileId}>
-            {candidate.relativePath}: {candidate.reason}
-          </li>
-        ))}
-      </ul>
+      {result.selectedChunks.length > 3 && (
+        <details>
+          <summary>
+            残りの選定コード {result.selectedChunks.length - 3}件
+          </summary>
+          {result.selectedChunks.slice(3).map((chunk) => (
+            <SelectedChunk key={chunk.fileId} chunk={chunk} />
+          ))}
+        </details>
+      )}
+      {result.excludedCandidates.length > 0 && (
+        <details>
+          <summary>除外候補 {result.excludedCandidates.length}件と理由</summary>
+          <ul>
+            {result.excludedCandidates.map((candidate) => (
+              <li key={candidate.fileId}>
+                {candidate.relativePath}: {candidate.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <details>
         <summary>組み立てた全材料・係数版・検証情報</summary>
         <p>
@@ -328,5 +346,29 @@ export function BudgetSummary({ result }: { result: BudgetResult }) {
         </pre>
       </details>
     </div>
+  );
+}
+
+/** 本文・省略範囲・選定理由を保ち、初期表示の一覧だけを短くする。 */
+function SelectedChunk({
+  chunk,
+}: {
+  chunk: BudgetResult["selectedChunks"][number];
+}) {
+  return (
+    <details>
+      <summary>
+        {chunk.relativePath} {chunk.mandatory ? "主選択・必須" : "関連追加"}
+      </summary>
+      <p>{chunk.reasons.join(" / ")}</p>
+      <p>本文保持メソッド: {chunk.methodIds.join(", ") || "なし"}</p>
+      <p>
+        省略行:{" "}
+        {chunk.omittedRanges
+          .map((range) => `${range.beginLine}–${range.endLine}`)
+          .join(", ") || "なし"}
+      </p>
+      <pre>{chunk.code}</pre>
+    </details>
   );
 }
