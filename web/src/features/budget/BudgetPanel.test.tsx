@@ -71,3 +71,49 @@ it("displays USD estimate, separate input and maximum output costs and thinking 
   expect(html).toContain("思考・cache・翻訳料金は含めていません。");
   expect(html).not.toContain("料金不明");
 });
+
+it("keeps handoff and generation mounted when displaying only the budget pane", () => {
+  const html = renderToStaticMarkup(
+    <BudgetPanel
+      workspaceId="w"
+      snapshotId="s"
+      question="説明して"
+      mode="SERVICE_REVIEW"
+      selected={new Set(["f"])}
+      busy={false}
+      activeSection="budget"
+    />,
+  );
+  expect(html).toContain('data-pane="handoff" hidden=""');
+  expect(html).toContain('data-pane="generate" hidden=""');
+  expect(html).toContain("入力トークン予算（tokens）");
+  expect(html.match(/type="password"/g)).toHaveLength(1);
+});
+
+it("folds additional selected chunks and excluded candidates without dropping their details", () => {
+  const result = {
+    selectedChunks: Array.from({ length: 4 }, (_, index) => ({
+      fileId: String(index),
+      relativePath: `File${index}.java`,
+      mandatory: index === 0,
+      reasons: ["選定理由"],
+      methodIds: ["method"],
+      omittedRanges: [{ beginLine: 8, endLine: 9 }],
+      code: `code-${index}`,
+    })),
+    excludedCandidates: [
+      { fileId: "excluded", relativePath: "Excluded.java", reason: "予算上限" },
+    ],
+    warnings: [],
+    counts: { tokens: 123 },
+    formula: {},
+    historyTurnsIncluded: 0,
+  } as unknown as BudgetResult;
+  const html = renderToStaticMarkup(<BudgetSummary result={result} />);
+  expect(html).toContain("残りの選定コード 1件");
+  expect(html).toContain("File3.java");
+  expect(html).toContain("code-3");
+  expect(html).toContain("8–9");
+  expect(html).toContain("除外候補 1件と理由");
+  expect(html).toContain("Excluded.java: 予算上限");
+});

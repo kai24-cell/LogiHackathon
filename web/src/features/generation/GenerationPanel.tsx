@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { apiErrorMessage } from "../../api/errorPresentation";
 import type { BudgetResult } from "../../types/budget";
+import type { ReviewSection } from "../budget/BudgetPanel";
 import type { PreviewInput } from "../budget/previewState";
 import { inputKey } from "../budget/previewState";
 import {
@@ -169,12 +170,14 @@ export function GenerationPanel({
   busy,
   onModelConfigured,
   onCompleted,
+  activeSection,
 }: {
   input: PreviewInput;
   preview?: BudgetResult;
   busy: boolean;
   onModelConfigured?: (modelId: string) => void;
   onCompleted?: () => void;
+  activeSection?: ReviewSection;
 }) {
   const [settings, setSettings] = useState<GenerationSettings>();
   const [key, setKey] = useState("");
@@ -391,107 +394,147 @@ export function GenerationPanel({
   }
   return (
     <section>
-      <h2>Geminiの英語回答と日本語翻訳</h2>
-      <p>
-        実APIモードでは生成・翻訳に料金が発生する可能性があります。翻訳できない部分は英語原文を表示します。固定応答モードは外部APIを呼びません。
-      </p>
-      <TranslationSettingsStatus ready={translationReady} />
-      <p>
-        previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
-      </p>
-      {settings?.configured && <p>{sourceLabel(settings.source)}</p>}
-      {settings?.demoAvailable && (
-        <button
-          disabled={saving || running}
-          onClick={() => void activateSource("demo")}
-        >
-          ローカルのデモ認証を利用（実API）
-        </button>
-      )}
-      {settings?.stubAvailable && (
-        <button
-          disabled={saving || running}
-          onClick={() => void activateSource("stub")}
-        >
-          固定応答を有効化（キー不要）
-        </button>
-      )}
-      {!settings?.stubAvailable && (
-        <label>
-          Gemini APIキー
-          <input
-            type="password"
-            autoComplete="off"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-          />
-        </label>
-      )}
-      <button
-        disabled={!key || saving || running || settings?.stubAvailable}
-        onClick={() => void configure()}
+      <div
+        data-pane="generate"
+        hidden={activeSection !== undefined && activeSection !== "generate"}
       >
-        現在のモデルIDとキーを設定
-      </button>
-      <button
-        disabled={saving || running || settings?.configured === false}
-        onClick={() => void configure(true)}
-      >
-        設定解除
-      </button>
-      <p>
-        {settings?.configured
-          ? settings.source === "STUB"
-            ? `固定応答設定済み（モデルID: ${settings.modelId}）`
-            : `キー設定済み（モデルID: ${settings.modelId}、Gemini疎通は未確認）`
-          : settings
-            ? "キー未設定"
-            : "キー設定状態を確認できません（未設定とは限りません）"}
-      </p>
-      {settings?.configured && settings.modelId !== input.modelId && (
+        <h2>回答の生成</h2>
         <p>
-          モデルが設定状態と異なります。現在のモデルとキーを設定してください。
+          実APIモードでは生成・翻訳に料金が発生する可能性があります。翻訳できない部分は英語原文を表示します。固定応答モードは外部APIを呼びません。
         </p>
-      )}
-      <button
-        disabled={
-          !canGenerate(input, preview, settings, running || saving, busy)
-        }
-        onClick={() => void send()}
-      >
-        {running
-          ? "生成中…"
-          : settings?.stubAvailable
-            ? "選定コードと質問で固定応答を検証"
-            : "選定コードと質問をGeminiへ送信"}
-      </button>
-      {running && jobId && (
-        <button onClick={() => void cancel()}>
-          {job?.state === "TRANSLATING" ||
-          job?.translation?.status === "RUNNING"
-            ? "翻訳だけ中止（回答は保持、課金取消は保証しません）"
-            : "キャンセル（課金取消は保証しません）"}
+
+        <p>
+          previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
+        </p>
+        {settings?.configured && <p>{sourceLabel(settings.source)}</p>}
+        {settings?.demoAvailable && (
+          <button
+            disabled={saving || running}
+            onClick={() => void activateSource("demo")}
+          >
+            ローカルのデモ認証を利用（実API）
+          </button>
+        )}
+        {settings?.stubAvailable && (
+          <button
+            disabled={saving || running}
+            onClick={() => void activateSource("stub")}
+          >
+            固定応答を有効化（キー不要）
+          </button>
+        )}
+        {!settings?.stubAvailable && (
+          <label>
+            Gemini APIキー
+            <input
+              type="password"
+              autoComplete="off"
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+            />
+          </label>
+        )}
+        <button
+          disabled={!key || saving || running || settings?.stubAvailable}
+          onClick={() => void configure()}
+        >
+          現在のモデルIDとキーを設定
         </button>
-      )}
-      {error && <p role="alert">{error}</p>}
-      {job?.errorCode && (
-        <p role="alert">
-          {job.state === "CANCELLED"
-            ? "キャンセルしました。実APIの課金取消は保証しません。"
-            : generationError(job.errorCode)}
+        <button
+          disabled={saving || running || settings?.configured === false}
+          onClick={() => void configure(true)}
+        >
+          設定解除
+        </button>
+        <p>
+          {settings?.configured
+            ? settings.source === "STUB"
+              ? `固定応答設定済み（モデルID: ${settings.modelId}）`
+              : `キー設定済み（モデルID: ${settings.modelId}、Gemini疎通は未確認）`
+            : settings
+              ? "キー未設定"
+              : "キー設定状態を確認できません（未設定とは限りません）"}
         </p>
-      )}
-      {job?.errorDetails && <p>{generationDiagnostics(job.errorDetails)}</p>}
-      {job?.result && (
-        <>
-          <EnglishResult result={job.result} translation={job.translation} />
-          {job.translation && job.translation.status !== "SUCCEEDED" && (
+        {settings?.configured && settings.modelId !== input.modelId && (
+          <p>
+            モデルが設定状態と異なります。現在のモデルとキーを設定してください。
+          </p>
+        )}
+        <button
+          disabled={
+            !canGenerate(input, preview, settings, running || saving, busy)
+          }
+          onClick={() => void send()}
+        >
+          {running
+            ? "生成中…"
+            : settings?.stubAvailable
+              ? "選定コードと質問で固定応答を検証"
+              : "選定コードと質問をGeminiへ送信"}
+        </button>
+        {running && jobId && (
+          <button onClick={() => void cancel()}>
+            {job?.state === "TRANSLATING" ||
+            job?.translation?.status === "RUNNING"
+              ? "翻訳だけ中止（回答は保持、課金取消は保証しません）"
+              : "キャンセル（課金取消は保証しません）"}
+          </button>
+        )}
+        {job?.errorCode && (
+          <p role="alert">
+            {job.state === "CANCELLED"
+              ? "キャンセルしました。実APIの課金取消は保証しません。"
+              : generationError(job.errorCode)}
+          </p>
+        )}
+        {job?.errorDetails && <p>{generationDiagnostics(job.errorDetails)}</p>}
+      </div>
+      <GenerationOperationFeedback
+        error={error}
+        activeSection={activeSection}
+      />
+      <div
+        data-pane="translation"
+        hidden={activeSection !== undefined && activeSection !== "translation"}
+      >
+        <h2>日本語翻訳</h2>
+        <TranslationSettingsStatus ready={translationReady} />
+        {job?.result &&
+          job.translation &&
+          job.translation.status !== "SUCCEEDED" && (
             <button disabled={running} onClick={() => void retryTranslation()}>
               再翻訳（Geminiは再実行しません）
             </button>
           )}
-        </>
-      )}
+        {running &&
+          jobId &&
+          (job?.state === "TRANSLATING" ||
+            job?.translation?.status === "RUNNING") && (
+            <button onClick={() => void cancel()}>
+              翻訳だけ中止（回答は保持、課金取消は保証しません）
+            </button>
+          )}
+      </div>
+      <div
+        data-pane="answer"
+        hidden={
+          activeSection !== undefined &&
+          activeSection !== "generate" &&
+          activeSection !== "translation"
+        }
+      >
+        {job?.result && (
+          <>
+            <EnglishResult
+              result={job.result}
+              translation={job.translation}
+              showTranslationControls={
+                activeSection === undefined || activeSection === "translation"
+              }
+            />
+          </>
+        )}
+      </div>
     </section>
   );
 }
@@ -500,9 +543,11 @@ export function GenerationPanel({
 export function EnglishResult({
   result,
   translation,
+  showTranslationControls = true,
 }: {
   result: NonNullable<GenerationJob["result"]>;
   translation?: GenerationJob["translation"];
+  showTranslationControls?: boolean;
 }) {
   const [showEnglish, setShowEnglish] = useState(false);
   const answer =
@@ -524,31 +569,23 @@ export function EnglishResult({
   }
   return (
     <article>
-      <h3>
-        {!showEnglish && translation?.status === "SUCCEEDED"
-          ? "日本語回答"
-          : !showEnglish && translation?.partialTranslation
-            ? "日本語回答（一部は英語原文）"
-            : "英語回答（未翻訳）"}
-      </h3>
-      {translation && (
-        <button onClick={() => setShowEnglish((value) => !value)}>
-          {showEnglish ? "日本語表示へ" : "英語原文を表示"}
-        </button>
-      )}
-      {translation?.status === "RUNNING" && (
-        <p>翻訳中です。取得済み回答は保持されています。</p>
-      )}
-      {translation && (
-        <p>
-          翻訳試行 {translation.attempt}回／{translation.durationMs} ms
-        </p>
-      )}
-      {translation?.warnings.map((warning, index) => (
-        <p key={index} role="alert">
-          {translationError(warning.code)} 未翻訳箇所：{warning.field}
-        </p>
-      ))}
+      <h3>{answerHeading(showEnglish, translation)}</h3>
+      <div hidden={!showTranslationControls}>
+        {translation && (
+          <button onClick={() => setShowEnglish((value) => !value)}>
+            {showEnglish ? "日本語表示へ" : "英語原文を表示"}
+          </button>
+        )}
+        {translation?.status === "RUNNING" && (
+          <p>翻訳中です。取得済み回答は保持されています。</p>
+        )}
+        {translation && (
+          <p>
+            翻訳試行 {translation.attempt}回／{translation.durationMs} ms
+          </p>
+        )}
+        <TranslationWarnings warnings={translation?.warnings ?? []} />
+      </div>
       <p>実行時の質問：{result.question}</p>
       <p>{sourceLabel(result.source)}</p>
       <p>
@@ -591,5 +628,69 @@ export function EnglishResult({
         <p key={i}>{warning}</p>
       ))}
     </article>
+  );
+}
+
+/** 同じ理由を一度だけ示し、各説明フィールドの診断情報は折りたたんで保持する。 */
+export function TranslationWarnings({
+  warnings,
+}: {
+  warnings: NonNullable<GenerationJob["translation"]>["warnings"];
+}) {
+  const groups = new Map<string, string[]>();
+  for (const warning of warnings) {
+    const fields = groups.get(warning.code) ?? [];
+    fields.push(warning.field);
+    groups.set(warning.code, fields);
+  }
+  return (
+    <>
+      {[...groups].map(([code, fields]) => (
+        <div key={code}>
+          <p role="alert">
+            {translationError(code)}（{fields.length}箇所）
+          </p>
+          <details>
+            <summary>未翻訳箇所の詳細</summary>
+            {fields.map((field, index) => (
+              <p key={index}>未翻訳箇所：{field}</p>
+            ))}
+          </details>
+        </div>
+      ))}
+    </>
+  );
+}
+
+export function answerHeading(
+  showEnglish: boolean,
+  translation?: GenerationJob["translation"],
+): string {
+  if (showEnglish && translation?.status === "SUCCEEDED") return "英語原文";
+  if (!showEnglish && translation?.status === "SUCCEEDED") return "日本語回答";
+  if (!showEnglish && translation?.partialTranslation)
+    return "日本語回答（一部は英語原文）";
+  return "英語回答（未翻訳）";
+}
+
+/** 操作元のタブを切り替えても、再翻訳・取消を含む失敗理由を一度だけ表示する。 */
+export function GenerationOperationFeedback({
+  error,
+  activeSection,
+}: {
+  error: string;
+  activeSection?: ReviewSection;
+}) {
+  return (
+    <div
+      data-pane="operation-feedback"
+      hidden={
+        activeSection !== undefined &&
+        activeSection !== "generate" &&
+        activeSection !== "translation"
+      }
+    >
+      {error && <p role="alert">{error}</p>}
+    </div>
   );
 }

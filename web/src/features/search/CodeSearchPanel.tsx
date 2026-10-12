@@ -12,6 +12,8 @@ const modeLabels: Record<SearchMode, string> = {
   AUTH_ANALYSIS: "認証・認可",
 };
 
+const initiallyVisibleCandidates = 3;
+
 export function createSearchRequest(
   question: string,
   selected: ReadonlySet<string>,
@@ -71,12 +73,16 @@ export function CodeSearchPanel({
   return (
     <section>
       <h2>関連コード検索</h2>
-      <p>
-        日本語の質問を翻訳せず検索します。英語の識別子と共通語がない場合、類似度は0になります。依存関係・役割は意味的一致の保証ではありません。
-      </p>
-      <label>
+      <details>
+        <summary>検索の仕組みと制限</summary>
+        <p>
+          日本語の質問を翻訳せず検索します。英語の識別子と共通語がない場合、類似度は0になります。依存関係・役割は意味的一致の保証ではありません。
+        </p>
+      </details>
+      <label className="question-composer">
         質問
         <textarea
+          className="question-input"
           value={question}
           onChange={(event) => {
             setQuestion(event.target.value);
@@ -123,7 +129,8 @@ export function CodeSearchPanel({
 export function SearchResult({ result }: { result: CodeSearchResult }) {
   const { weights } = result;
   return (
-    <div>
+    <details open>
+      <summary>関連ファイル候補（{result.candidates.length}件）</summary>
       <p>
         暫定式：R = {weights.cosine} × 類似度 + {weights.dependency} × 依存 +{" "}
         {weights.roleFit} × 役割（{result.formulaVersion}）
@@ -137,52 +144,22 @@ export function SearchResult({ result }: { result: CodeSearchResult }) {
           {warning}
         </p>
       ))}
-      <table>
-        <caption>関連ファイル候補とスコア内訳</caption>
-        <thead>
-          <tr>
-            <th>順位</th>
-            <th>ファイル・理由</th>
-            <th>類似度／寄与</th>
-            <th>依存／寄与</th>
-            <th>役割／寄与</th>
-            <th>総合</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result.candidates.map((candidate) => (
-            <tr key={candidate.fileId}>
-              <td>{candidate.rank}</td>
-              <td>
-                {candidate.relativePath}
-                {candidate.primarySelected && "（主選択）"}
-                <ul>
-                  {candidate.reasons.map((reason, index) => (
-                    <li key={index}>{reason}</li>
-                  ))}
-                </ul>
-                <small>
-                  役割：{candidate.roles.join(" / ") || "根拠なし"} ·
-                  代表メソッド行：{candidate.beginLine}
-                </small>
-              </td>
-              <td>
-                {candidate.score.cosine.toFixed(4)} /{" "}
-                {candidate.score.cosineContribution.toFixed(4)}
-              </td>
-              <td>
-                {candidate.score.dependency.toFixed(4)} /{" "}
-                {candidate.score.dependencyContribution.toFixed(4)}
-              </td>
-              <td>
-                {candidate.score.roleFit.toFixed(4)} /{" "}
-                {candidate.score.roleContribution.toFixed(4)}
-              </td>
-              <td>{candidate.score.total.toFixed(4)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <CandidateTable
+        candidates={result.candidates.slice(0, initiallyVisibleCandidates)}
+        caption="関連ファイル候補とスコア内訳"
+      />
+      {result.candidates.length > initiallyVisibleCandidates && (
+        <details>
+          <summary>
+            その他の関連ファイル（
+            {result.candidates.length - initiallyVisibleCandidates}件）
+          </summary>
+          <CandidateTable
+            candidates={result.candidates.slice(initiallyVisibleCandidates)}
+            caption="その他の関連ファイルとスコア内訳"
+          />
+        </details>
+      )}
       {result.candidates.length === 0 && (
         <p>走査済みの検索候補がありません。</p>
       )}
@@ -190,6 +167,64 @@ export function SearchResult({ result }: { result: CodeSearchResult }) {
         <summary>比較用の正確なスコア・式・入力snapshot</summary>
         <pre>{JSON.stringify(result, null, 2)}</pre>
       </details>
-    </div>
+    </details>
+  );
+}
+
+/** 候補の順位・理由・寄与を変更せず、表示する範囲だけを分割する。 */
+function CandidateTable({
+  candidates,
+  caption,
+}: {
+  candidates: CodeSearchResult["candidates"];
+  caption: string;
+}) {
+  return (
+    <table>
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          <th>順位</th>
+          <th>ファイル・理由</th>
+          <th>類似度／寄与</th>
+          <th>依存／寄与</th>
+          <th>役割／寄与</th>
+          <th>総合</th>
+        </tr>
+      </thead>
+      <tbody>
+        {candidates.map((candidate) => (
+          <tr key={candidate.fileId}>
+            <td>{candidate.rank}</td>
+            <td>
+              {candidate.relativePath}
+              {candidate.primarySelected && "（主選択）"}
+              <ul>
+                {candidate.reasons.map((reason, index) => (
+                  <li key={index}>{reason}</li>
+                ))}
+              </ul>
+              <small>
+                役割：{candidate.roles.join(" / ") || "根拠なし"} ·
+                代表メソッド行：{candidate.beginLine}
+              </small>
+            </td>
+            <td>
+              {candidate.score.cosine.toFixed(4)} /{" "}
+              {candidate.score.cosineContribution.toFixed(4)}
+            </td>
+            <td>
+              {candidate.score.dependency.toFixed(4)} /{" "}
+              {candidate.score.dependencyContribution.toFixed(4)}
+            </td>
+            <td>
+              {candidate.score.roleFit.toFixed(4)} /{" "}
+              {candidate.score.roleContribution.toFixed(4)}
+            </td>
+            <td>{candidate.score.total.toFixed(4)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

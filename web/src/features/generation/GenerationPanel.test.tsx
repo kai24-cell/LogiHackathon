@@ -9,6 +9,9 @@ import {
   conversationRefreshKey,
   TranslationSettingsStatus,
   translationError,
+  TranslationWarnings,
+  answerHeading,
+  GenerationOperationFeedback,
 } from "./GenerationPanel";
 import { canGenerate, type GenerationJob } from "../../types/generation";
 import type { PreviewInput } from "../budget/previewState";
@@ -254,4 +257,52 @@ it("shows the English submission wording when Japanese translation is not config
   expect(html).toContain("現在は英語回答。日本語翻訳は未設定。");
   expect(html).toContain("会話履歴とTXT保存は英語回答でも利用できます。");
   expect(html).not.toContain("翻訳認証設定あり");
+});
+
+it("keeps a single authentication input mounted while hiding the inactive generation pane", () => {
+  const html = renderToStaticMarkup(
+    <GenerationPanel input={input} busy={false} activeSection="translation" />,
+  );
+  expect(html).toContain('data-pane="generate" hidden=""');
+  expect(html).toContain('data-pane="translation"');
+  expect(html.match(/type="password"/g)).toHaveLength(1);
+});
+it("groups repeated translation reasons while preserving every field detail", () => {
+  const html = renderToStaticMarkup(
+    <TranslationWarnings
+      warnings={[
+        { code: "TRANSLATION_NOT_READY", field: "summary" },
+        { code: "TRANSLATION_NOT_READY", field: "sections[0].body" },
+        { code: "TRANSLATION_TIMEOUT", field: "findings[0].explanation" },
+      ]}
+    />,
+  );
+  expect(html.match(/GCP認証とproject/g)).toHaveLength(1);
+  expect(html).toContain("（2箇所）");
+  expect(html).toContain("未翻訳箇所：summary");
+  expect(html).toContain("未翻訳箇所：sections[0].body");
+  expect(html).toContain("findings[0].explanation");
+});
+it("labels the original of a successfully translated answer as English original", () => {
+  const translated = { status: "SUCCEEDED" } as NonNullable<
+    GenerationJob["translation"]
+  >;
+  expect(answerHeading(true, translated)).toBe("英語原文");
+  expect(answerHeading(false, translated)).toBe("日本語回答");
+  expect(answerHeading(true, undefined)).toBe("英語回答（未翻訳）");
+});
+
+it("shows translation operation failures in the shared visible feedback pane", () => {
+  for (const error of [
+    "再翻訳を開始できません。接続を確認してください。（HTTP 409 / BUSY）",
+    "キャンセルを確認できません。完了状態を確認してください。",
+  ]) {
+    const html = renderToStaticMarkup(
+      <GenerationOperationFeedback activeSection="translation" error={error} />,
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain(error);
+    expect(html).not.toContain("hidden");
+    expect(html.match(/role="alert"/g)).toHaveLength(1);
+  }
 });
