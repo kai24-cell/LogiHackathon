@@ -3,11 +3,11 @@ package jp.cheapreview.generation.service;
 import java.util.Arrays;
 
 /** JSONの成否に依存せず、保持前の文字列から認証キーの表現を除去する。 */
-final class SecretRedaction {
+public final class SecretRedaction {
   private SecretRedaction() {}
 
   /** 不正JSONでも文字列を照合し、長いキーで正規表現の再帰が深くならないようにする。 */
-  static String redact(String raw, String key) {
+  public static String redact(String raw, String key) {
     if (key == null || key.isEmpty()) return raw;
 
     // literalとescape混在の両方を元文字列の範囲へ戻し、重なる部分を一度に除去する。

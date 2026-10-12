@@ -172,13 +172,13 @@ def verify(args):
             "settingsVersion": configured["version"], "input": input_data,
         })
         job = wait_for(lambda: call("/jobs/" + started["jobId"]),
-                       lambda value: value["state"] in {"SUCCEEDED", "FAILED", "CANCELLED"}, 260)
+                       lambda value: value["state"] in {"SUCCEEDED", "TRANSLATION_FAILED", "FAILED", "CANCELLED"}, 260)
         expected = {"invalid": "INVALID_ANSWER", "timeout": "GENERATION_TIMEOUT"}.get(args.scenario)
         if expected:
             assert job["state"] == "FAILED" and job["errorCode"] == expected
             print(f"STUB_CONFIRMED scenario={args.scenario} code={expected} generation_requests=1")
             return
-        if job["state"] != "SUCCEEDED":
+        if job["state"] not in {"SUCCEEDED", "TRANSLATION_FAILED"}:
             code = job.get("errorCode")
             # enumも念のため許可リストを通す。生本文・model・キーは表示しない。
             details = job.get("errorDetails") or {}
@@ -205,8 +205,15 @@ def verify(args):
             assert set(section["referenceIds"]) <= references
         for finding in result["answerEnglish"]["findings"]:
             assert set(finding["referenceIds"]) <= references
+        translation = job.get("translation") or {}
+        translation_status = translation.get("status")
+        assert translation_status in {"SUCCEEDED", "PARTIAL", "FAILED"}
+        if not args.real:
+            assert translation_status == "FAILED"
+            assert translation.get("errorCode") == "TRANSLATION_NOT_READY"
+            assert translation["displayAnswer"] == result["answerEnglish"]
         label = "REAL_API_CONFIRMED" if args.real else "STUB_CONFIRMED"
-        print(f"{label} budget/schema/references=PASS generation_requests=1 translation=UNVERIFIED")
+        print(f"{label} budget/schema/references=PASS generation_requests=1 translation_status={translation_status}")
         print("usage=" + json.dumps(result["usage"]))
     finally:
         process.terminate()

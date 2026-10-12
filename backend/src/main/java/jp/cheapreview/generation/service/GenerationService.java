@@ -16,7 +16,12 @@ import jp.cheapreview.budget.service.BudgetPreviewService;
 import jp.cheapreview.budget.service.PromptMaterializer;
 import jp.cheapreview.generation.dto.GenerationDtos;
 import jp.cheapreview.generation.dto.GenerationDtos.State;
+import jp.cheapreview.generation.event.TranslationDisplayUpdated;
+import jp.cheapreview.translation.dto.TranslationDtos;
+import jp.cheapreview.translation.service.TranslationService;
+import jp.cheapreview.translation.service.TranslationSymbols;
 import jp.cheapreview.workspace.service.WorkspaceService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -31,6 +36,8 @@ public class GenerationService {
   private final GenerationSettings settings;
   private final GeminiClient provider;
   private final AnswerValidator answers;
+  private final TranslationService translations;
+  private final ApplicationEventPublisher events;
   private final ExecutorService workers = Executors.newFixedThreadPool(2);
   private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
   private final Map<String, Entry> jobs = new LinkedHashMap<>();
@@ -41,6 +48,9 @@ public class GenerationService {
     GenerationDtos.Job view;
     Future<?> future;
     String failedRaw;
+    java.util.List<String> translationSymbols = java.util.List.of();
+    boolean translationCancelled;
+    boolean translationRunning;
 
     Entry(GenerationDtos.Start input) {
       this.input = input;
@@ -55,12 +65,16 @@ public class GenerationService {
       BudgetPreviewService budgets,
       GenerationSettings settings,
       GeminiClient provider,
-      AnswerValidator answers) {
+      AnswerValidator answers,
+      TranslationService translations,
+      ApplicationEventPublisher events) {
     this.workspaces = workspaces;
     this.budgets = budgets;
     this.settings = settings;
     this.provider = provider;
     this.answers = answers;
+    this.translations = translations;
+    this.events = events;
   }
 
   /** 同じrequestIdには同じjobを返し、異なる入力の再利用や同時生成を拒否する。 */
@@ -128,6 +142,51 @@ public class GenerationService {
     return new GenerationDtos.Started(active);
   }
 
+  /** 再翻訳は保存済み英語回答だけを使い、Gemini・再走査・履歴commitを呼ばない。 */
+  public synchronized GenerationDtos.Started translate(String id) {
+    var entry = find(id);
+    if (entry.view.result() == null
+        || (entry.view.state() != State.SUCCEEDED
+            && entry.view.state() != State.TRANSLATION_FAILED))
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "TRANSLATION_NOT_AVAILABLE");
+    if (active != null) throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "BUSY");
+    int attempt = entry.view.translation() == null ? 1 : entry.view.translation().attempt() + 1;
+    entry.translationCancelled = false;
+    var previous = entry.view.translation();
+    var running =
+        new TranslationDtos.Result(
+            previous == null ? entry.view.result().answerEnglish() : previous.displayAnswer(),
+            previous != null && previous.partialTranslation(),
+            previous == null ? java.util.List.of() : previous.warnings(),
+            attempt,
+            0,
+            TranslationDtos.Status.RUNNING,
+            null);
+    // 完了済みジョブ状態は巻き戻さず、翻訳だけの進行を別のstatusで表す。
+    entry.view =
+        new GenerationDtos.Job(
+            entry.view.jobId(),
+            entry.view.state(),
+            null,
+            entry.view.result(),
+            entry.view.createdAt(),
+            null,
+            running);
+    active = id;
+    entry.future =
+        workers.submit(
+            () -> {
+              try {
+                finishTranslation(entry, attempt);
+              } finally {
+                synchronized (GenerationService.this) {
+                  if (id.equals(active)) active = null;
+                }
+              }
+            });
+    return new GenerationDtos.Started(id);
+  }
+
   /** 既存走査ジョブと生成ジョブを同じGET契約へ統合し、旧走査のstate/errorCodeを維持する。 */
   public GenerationDtos.Job query(String id) {
     try {
@@ -142,6 +201,40 @@ public class GenerationService {
 
   public synchronized GenerationDtos.Job cancel(String id) {
     var entry = find(id);
+    if (entry.view.state() == State.TRANSLATING
+        || (entry.view.translation() != null
+            && entry.view.translation().status() == TranslationDtos.Status.RUNNING)) {
+      entry.translationCancelled = true;
+      var previous = entry.view.translation();
+      var warnings =
+          new java.util.ArrayList<TranslationDtos.Warning>(
+              previous == null ? java.util.List.of() : previous.warnings());
+      warnings.add(new TranslationDtos.Warning("answer", "TRANSLATION_CANCELLED"));
+      var cancelled =
+          new TranslationDtos.Result(
+              previous == null ? entry.view.result().answerEnglish() : previous.displayAnswer(),
+              previous != null && previous.partialTranslation(),
+              java.util.List.copyOf(warnings),
+              previous == null ? 1 : previous.attempt(),
+              previous == null ? 0 : previous.durationMs(),
+              TranslationDtos.Status.FAILED,
+              "TRANSLATION_CANCELLED");
+      // 生成成功は取り消さず、翻訳だけ止める。遅延した翻訳結果は下記flagで採用しない。
+      entry.view =
+          new GenerationDtos.Job(
+              entry.view.jobId(),
+              State.TRANSLATION_FAILED,
+              null,
+              entry.view.result(),
+              entry.view.createdAt(),
+              null,
+              cancelled);
+      if (entry.translationRunning && entry.future != null) entry.future.cancel(true);
+      events.publishEvent(
+          new TranslationDisplayUpdated(
+              id, cancelled.displayAnswer(), cancelled.partialTranslation()));
+      return entry.view;
+    }
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING) {
       boolean running = entry.view.state() == State.GENERATING;
       transition(entry, State.CANCELLED, "CANCELLED", null);
@@ -197,9 +290,13 @@ public class GenerationService {
               entry.input.input().workspaceId(),
               credentials.source());
       synchronized (this) {
-        if (entry.view.state() == State.GENERATING)
-          transition(entry, State.SUCCEEDED, null, result);
+        if (entry.view.state() != State.GENERATING) return;
+        // 英語成功を先に保持し、240秒の生成期限で翻訳中に結果を失わないよう期限を解除する。
+        deadline.cancel(false);
+        entry.translationSymbols = TranslationSymbols.from(preview.selectedChunks());
+        transition(entry, State.TRANSLATING, null, result);
       }
+      finishTranslation(entry, 1);
     } catch (GenerationFailure failure) {
       fail(entry, failure.getMessage(), failure.details());
     } catch (Exception exception) {
@@ -210,6 +307,45 @@ public class GenerationService {
       synchronized (this) {
         if (entry.view.jobId().equals(active)) active = null;
       }
+    }
+  }
+
+  /** 翻訳の失敗は生成結果とusageを消さず、英語fallbackと警告を表示する。 */
+  private void finishTranslation(Entry entry, int attempt) {
+    GenerationDtos.Result result;
+    synchronized (this) {
+      if (entry.translationCancelled) return;
+      entry.translationRunning = true;
+      result = entry.view.result();
+    }
+    TranslationDtos.Result translated;
+    try {
+      translated =
+          translations.translate(result.answerEnglish(), entry.translationSymbols, attempt);
+    } catch (Exception ignored) {
+      translated =
+          new TranslationDtos.Result(
+              result.answerEnglish(),
+              false,
+              java.util.List.of(new TranslationDtos.Warning("answer", "TRANSLATION_FAILED")),
+              attempt,
+              0,
+              TranslationDtos.Status.FAILED,
+              "TRANSLATION_FAILED");
+    }
+    synchronized (this) {
+      entry.translationRunning = false;
+      if (entry.translationCancelled) return;
+      State state =
+          translated.status() == TranslationDtos.Status.SUCCEEDED
+              ? State.SUCCEEDED
+              : State.TRANSLATION_FAILED;
+      entry.view =
+          new GenerationDtos.Job(
+              entry.view.jobId(), state, null, result, entry.view.createdAt(), null, translated);
+      events.publishEvent(
+          new TranslationDisplayUpdated(
+              entry.view.jobId(), translated.displayAnswer(), translated.partialTranslation()));
     }
   }
 

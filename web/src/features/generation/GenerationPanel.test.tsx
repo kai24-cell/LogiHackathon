@@ -6,6 +6,7 @@ import {
   generationError,
   sourceLabel,
   generationDiagnostics,
+  translationError,
 } from "./GenerationPanel";
 import { canGenerate, type GenerationJob } from "../../types/generation";
 import type { PreviewInput } from "../budget/previewState";
@@ -125,7 +126,7 @@ describe("Gemini generation controls", () => {
     expect(html).not.toContain("キー未設定");
     // 失敗後も既存キーが残る可能性があるため、状態不明でも明示解除は可能にする。
     expect(html).toContain("<button>設定解除</button>");
-    expect(html).toContain("今回は英語の構造化回答");
+    expect(html).toContain("翻訳できない部分は英語原文");
   });
   it("escapes answer code and uses trusted reference ranges with nullable API usage", () => {
     const result: NonNullable<GenerationJob["result"]> = {
@@ -176,5 +177,37 @@ describe("Gemini generation controls", () => {
     expect(html).toContain("未提供");
     expect(html).toContain("入力推定 20");
     expect(html).toContain("固定応答");
+    const translated = renderToStaticMarkup(
+      <EnglishResult
+        result={result}
+        translation={{
+          displayAnswer: { ...result.answerEnglish, summary: "日本語の説明" },
+          partialTranslation: true,
+          warnings: [
+            {
+              field: "sections[0].body",
+              code: "TRANSLATION_PLACEHOLDER_MISMATCH",
+            },
+          ],
+          attempt: 2,
+          durationMs: 10,
+          status: "PARTIAL",
+          errorCode: "TRANSLATION_PLACEHOLDER_MISMATCH",
+        }}
+      />,
+    );
+    expect(translated).toContain("日本語の説明");
+    expect(translated).toContain("一部は英語原文");
+    expect(translated).toContain("英語原文を表示");
+    expect(translated).toContain("未翻訳箇所：sections[0].body");
+    expect(translated).toContain("Service.java：2–5行");
+    expect(translated).not.toContain("<img");
+  });
+  it("explains translation failure without exposing arbitrary provider text", () => {
+    expect(translationError("TRANSLATION_NOT_READY")).toContain("GCP認証");
+    expect(translationError("secret-sentinel")).not.toContain(
+      "secret-sentinel",
+    );
+    expect(translationError("TRANSLATION_TIMEOUT")).toContain("英語原文");
   });
 });

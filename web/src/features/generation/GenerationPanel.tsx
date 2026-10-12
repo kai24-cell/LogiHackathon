@@ -62,6 +62,30 @@ export function sourceLabel(source: string | undefined): string {
   return "ユーザー認証による実API（料金が発生する可能性があります）";
 }
 
+/** 外部のエラー本文を表示せず、定型コードから次の操作を示す。 */
+export function translationError(code: string): string {
+  const messages: Record<string, string> = {
+    TRANSLATION_NOT_READY:
+      "翻訳未設定です。GCP認証とprojectを設定してください。英語原文を表示します。",
+    TRANSLATION_AUTH_FAILED:
+      "翻訳認証に失敗しました。認証ファイル・権限・API有効化を確認してください。",
+    TRANSLATION_TIMEOUT:
+      "翻訳が時間上限に達しました。英語原文を保持しています。",
+    TRANSLATION_CANCELLED:
+      "翻訳を中止しました。取得済み回答とusageは保持しています。",
+    TRANSLATION_QUOTA_EXCEEDED:
+      "翻訳の利用上限に達しました。割当・課金設定を確認してください。",
+    TRANSLATION_PLACEHOLDER_MISMATCH:
+      "コード識別子を安全に復元できなかったため、この部分は英語原文を表示します。",
+    TRANSLATION_TEXT_TOO_LONG:
+      "説明が翻訳上限を超え、安全に分割できないため英語原文を表示します。",
+  };
+  return (
+    messages[code] ??
+    "翻訳に失敗した部分は英語原文を表示します。再翻訳してもGeminiは再実行しません。"
+  );
+}
+
 /** 外部の任意文字列は表示せず、定型値だけで失敗箇所と制限を説明する。 */
 export function generationDiagnostics(
   details: GenerationJob["errorDetails"],
@@ -134,6 +158,8 @@ export function GenerationPanel({
   const [job, setJob] = useState<GenerationJob>();
   const [jobId, setJobId] = useState("");
   const [error, setError] = useState("");
+  const [translationReady, setTranslationReady] = useState<boolean>();
+  const [translationRetry, setTranslationRetry] = useState(0);
   const pending = useRef<{ key: string; request: GenerationStart } | undefined>(
     undefined,
   );
@@ -143,8 +169,26 @@ export function GenerationPanel({
   current.current = { input, preview, settings };
   const running =
     sending ||
-    (!!jobId && (!job || job.state === "QUEUED" || job.state === "GENERATING"));
+    (!!jobId &&
+      (!job ||
+        job.state === "QUEUED" ||
+        job.state === "GENERATING" ||
+        job.state === "TRANSLATING" ||
+        job.translation?.status === "RUNNING"));
 
+  useEffect(() => {
+    let stopped = false;
+    void api<{ configured: boolean }>("/translation/status")
+      .then((value) => {
+        if (!stopped) setTranslationReady(value.configured);
+      })
+      .catch(() => {
+        if (!stopped) setTranslationReady(undefined);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, []);
   useEffect(() => {
     let cancelled = false;
     const version = settingsRequestVersion.current;
@@ -176,7 +220,12 @@ export function GenerationPanel({
         const value = await api<GenerationJob>(`/jobs/${jobId}`);
         if (cancelled) return;
         setJob(value);
-        if (value.state !== "QUEUED" && value.state !== "GENERATING") {
+        if (
+          value.state !== "QUEUED" &&
+          value.state !== "GENERATING" &&
+          value.state !== "TRANSLATING" &&
+          value.translation?.status !== "RUNNING"
+        ) {
           pending.current = undefined;
           return;
         }
@@ -193,7 +242,7 @@ export function GenerationPanel({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [jobId]);
+  }, [jobId, translationRetry]);
 
   async function configure(clear = false) {
     if (saving) return;
@@ -294,11 +343,33 @@ export function GenerationPanel({
       setError("キャンセルを確認できません。完了状態を確認してください。");
     }
   }
+
+  /** 取得済み回答だけを再翻訳し、生成POSTは送らない。 */
+  async function retryTranslation() {
+    if (!jobId || running) return;
+    setSending(true);
+    try {
+      await api<{ jobId: string }>(`/jobs/${jobId}/translate`, {});
+      setJob(await api<GenerationJob>(`/jobs/${jobId}`));
+      setTranslationRetry((value) => value + 1);
+    } catch (failure) {
+      setError("再翻訳を開始できません。" + apiErrorMessage(failure));
+    } finally {
+      setSending(false);
+    }
+  }
   return (
     <section>
-      <h2>Geminiによる英語回答</h2>
+      <h2>Geminiの英語回答と日本語翻訳</h2>
       <p>
-        実APIモードでは料金が発生する可能性があります。固定応答モードは外部APIを呼びません。翻訳は後続Issueのため、今回は英語の構造化回答を表示します。
+        実APIモードでは生成・翻訳に料金が発生する可能性があります。翻訳できない部分は英語原文を表示します。固定応答モードは外部APIを呼びません。
+      </p>
+      <p>
+        {translationReady === true
+          ? "翻訳認証設定あり（有効性・疎通は未確認）"
+          : translationReady === false
+            ? "現在は英語回答。日本語翻訳は未設定。会話履歴とTXT保存は英語回答でも利用できます。"
+            : "翻訳設定の状態は未確認です。"}
       </p>
       <p>
         previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
@@ -371,7 +442,10 @@ export function GenerationPanel({
       </button>
       {running && jobId && (
         <button onClick={() => void cancel()}>
-          キャンセル（課金取消は保証しません）
+          {job?.state === "TRANSLATING" ||
+          job?.translation?.status === "RUNNING"
+            ? "翻訳だけ中止（回答は保持、課金取消は保証しません）"
+            : "キャンセル（課金取消は保証しません）"}
         </button>
       )}
       {error && <p role="alert">{error}</p>}
@@ -383,7 +457,16 @@ export function GenerationPanel({
         </p>
       )}
       {job?.errorDetails && <p>{generationDiagnostics(job.errorDetails)}</p>}
-      {job?.result && <EnglishResult result={job.result} />}
+      {job?.result && (
+        <>
+          <EnglishResult result={job.result} translation={job.translation} />
+          {job.translation && job.translation.status !== "SUCCEEDED" && (
+            <button disabled={running} onClick={() => void retryTranslation()}>
+              再翻訳（Geminiは再実行しません）
+            </button>
+          )}
+        </>
+      )}
     </section>
   );
 }
@@ -391,10 +474,16 @@ export function GenerationPanel({
 /** 後続翻訳用の英語DTOをHTMLとして解釈せず、安全な文字列とコードで表示する。 */
 export function EnglishResult({
   result,
+  translation,
 }: {
   result: NonNullable<GenerationJob["result"]>;
+  translation?: GenerationJob["translation"];
 }) {
-  const answer = result.answerEnglish;
+  const [showEnglish, setShowEnglish] = useState(false);
+  const answer =
+    !showEnglish && translation
+      ? translation.displayAnswer
+      : result.answerEnglish;
   function references(ids: string[]) {
     return ids.map((id) => {
       const ref = result.references.find((item) => item.referenceId === id);
@@ -410,7 +499,31 @@ export function EnglishResult({
   }
   return (
     <article>
-      <h3>英語回答（未翻訳）</h3>
+      <h3>
+        {!showEnglish && translation?.status === "SUCCEEDED"
+          ? "日本語回答"
+          : !showEnglish && translation?.partialTranslation
+            ? "日本語回答（一部は英語原文）"
+            : "英語回答（未翻訳）"}
+      </h3>
+      {translation && (
+        <button onClick={() => setShowEnglish((value) => !value)}>
+          {showEnglish ? "日本語表示へ" : "英語原文を表示"}
+        </button>
+      )}
+      {translation?.status === "RUNNING" && (
+        <p>翻訳中です。取得済み回答は保持されています。</p>
+      )}
+      {translation && (
+        <p>
+          翻訳試行 {translation.attempt}回／{translation.durationMs} ms
+        </p>
+      )}
+      {translation?.warnings.map((warning, index) => (
+        <p key={index} role="alert">
+          {translationError(warning.code)} 未翻訳箇所：{warning.field}
+        </p>
+      ))}
       <p>実行時の質問：{result.question}</p>
       <p>{sourceLabel(result.source)}</p>
       <p>

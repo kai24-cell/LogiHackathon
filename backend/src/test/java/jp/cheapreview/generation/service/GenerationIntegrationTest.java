@@ -69,6 +69,7 @@ class GenerationIntegrationTest {
   @Autowired AnswerValidator validator;
   @Autowired ObjectMapper mapper;
   @MockitoBean GeminiClient provider;
+  @MockitoBean jp.cheapreview.translation.service.TranslationClient translator;
   @TempDir Path root;
   String workspace;
   String snapshot;
@@ -93,6 +94,10 @@ class GenerationIntegrationTest {
     file = capture.files().getFirst().fileId();
     configured = settings.update(new SettingsDtos.Update("fixture-model", KEY));
     when(provider.generate(any(), any(), anyLong(), anyLong())).thenReturn(reply(ANSWER));
+    when(translator.configured()).thenReturn(true);
+    when(translator.translate(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(translator.translate(any(), any()))
+        .thenAnswer(invocation -> translator.translate(invocation.getArgument(0)));
   }
 
   private GeminiClient.Reply reply(String raw) {
@@ -126,13 +131,98 @@ class GenerationIntegrationTest {
     do {
       job = generation.get(id);
       if (job.state() != GenerationDtos.State.QUEUED
-          && job.state() != GenerationDtos.State.GENERATING) {
+          && job.state() != GenerationDtos.State.GENERATING
+          && job.state() != GenerationDtos.State.TRANSLATING
+          && (job.translation() == null
+              || job.translation().status()
+                  != jp.cheapreview.translation.dto.TranslationDtos.Status.RUNNING)) {
         Thread.sleep(20);
         return job;
       }
       if (System.nanoTime() > deadline) fail("Generation timeout");
       Thread.sleep(10);
     } while (true);
+  }
+
+  @Test
+  void translationFailureRetainsEnglishAndRetryDoesNotCallGeminiAgain() throws Exception {
+    when(translator.translate(any()))
+        .thenThrow(
+            new jp.cheapreview.translation.service.TranslationFailure("TRANSLATION_TIMEOUT"));
+    var started = generation.start(request(input(Mode.SERVICE_REVIEW, 8192)));
+    var failed = completed(started.jobId());
+    assertEquals(GenerationDtos.State.TRANSLATION_FAILED, failed.state());
+    assertEquals("Explanation", failed.result().answerEnglish().summary());
+    assertEquals(35L, failed.result().usage().totalTokens());
+    assertEquals("TRANSLATION_TIMEOUT", failed.translation().errorCode());
+    org.mockito.Mockito.doAnswer(invocation -> invocation.getArgument(0))
+        .when(translator)
+        .translate(any());
+    generation.translate(started.jobId());
+    var retried = completed(started.jobId());
+    assertEquals(GenerationDtos.State.SUCCEEDED, retried.state());
+    assertEquals(2, retried.translation().attempt());
+    assertEquals(failed.result(), retried.result());
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void cancellingFirstOrRetriedTranslationKeepsEnglishAndRejectsLateUpdates(boolean retry)
+      throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    GenerationDtos.Started started = null;
+    if (retry) {
+      org.mockito.Mockito.doAnswer(
+              invocation -> {
+                List<String> contents = invocation.getArgument(0);
+                var translated =
+                    new java.util.ArrayList<>(
+                        contents.stream().map(value -> "日本語 " + value).toList());
+                translated.set(0, "");
+                return translated;
+              })
+          .when(translator)
+          .translate(any());
+      started = generation.start(request(input(Mode.SERVICE_REVIEW, 8192)));
+      assertTrue(completed(started.jobId()).translation().partialTranslation());
+    }
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              entered.countDown();
+              while (release.getCount() > 0) {
+                try {
+                  release.await(100, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException ignored) {
+                  /* 遅延結果が到着するproviderを再現。 */
+                }
+              }
+              return invocation.getArgument(0);
+            })
+        .when(translator)
+        .translate(any());
+    if (retry) generation.translate(started.jobId());
+    else started = generation.start(request(input(Mode.SERVICE_REVIEW, 8192)));
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    var before = generation.get(started.jobId()).result();
+    var cancelled = generation.cancel(started.jobId());
+    assertEquals(GenerationDtos.State.TRANSLATION_FAILED, cancelled.state());
+    assertEquals("TRANSLATION_CANCELLED", cancelled.translation().errorCode());
+    assertEquals(before, cancelled.result());
+    if (retry)
+      assertTrue(
+          cancelled.translation().warnings().stream()
+              .anyMatch(warning -> warning.field().equals("summary")));
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+    while (generation.activeJob().jobId() != null) {
+      if (System.nanoTime() > deadline) fail("Translation active not released");
+      Thread.sleep(10);
+    }
+    release.countDown();
+    Thread.sleep(100);
+    assertEquals(cancelled, generation.get(started.jobId()));
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
   }
 
   @Test
