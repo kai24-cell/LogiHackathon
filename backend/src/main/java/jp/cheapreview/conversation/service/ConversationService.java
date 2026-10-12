@@ -238,11 +238,14 @@ public class ConversationService {
 
   /** 再翻訳は表示本文だけを置き換え、英語履歴・往復数を変更しない。 */
   public synchronized void updateDisplay(
-      String id, String jobId, GenerationDtos.Answer display, boolean partial) {
-    if (id == null || !conversations.containsKey(id)) return;
-    var view = get(id);
+      String id, String jobId, GenerationDtos.Answer display, boolean hasUntranslated) {
+    if (id == null) return;
+    prune();
+    var view = conversations.get(id);
+    if (view == null) return;
     // 未commit・取消・保持期限で破棄したjobの遅延eventは会話版も変更しない。
     if (view.turns().stream().noneMatch(turn -> turn.jobId().equals(jobId))) return;
+    touch(id);
     var turns =
         view.turns().stream()
             .map(
@@ -254,11 +257,26 @@ public class ConversationService {
                             turn.mode(),
                             turn.answerEnglish(),
                             turn.references(),
-                            ConversationText.answer(display, turn.references(), partial))
+                            ConversationText.answer(display, turn.references(), hasUntranslated))
                         : turn)
             .toList();
     conversations.put(
         id, new View(id, view.workspaceId(), view.version() + 1, turns, view.imported()));
+  }
+
+  /** 翻訳eventは確定済み往復へ一方向に届け、生成Serviceのロックを取り直さない。 */
+  @org.springframework.context.event.EventListener
+  public synchronized void translated(
+      jp.cheapreview.generation.event.TranslationDisplayUpdated update) {
+    prune();
+    String id =
+        conversations.values().stream()
+            .filter(
+                view -> view.turns().stream().anyMatch(turn -> turn.jobId().equals(update.jobId())))
+            .map(View::conversationId)
+            .findFirst()
+            .orElse(null);
+    if (id != null) updateDisplay(id, update.jobId(), update.display(), update.hasUntranslated());
   }
 
   public synchronized String export(String id) {

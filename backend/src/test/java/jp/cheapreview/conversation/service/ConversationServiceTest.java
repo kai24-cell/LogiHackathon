@@ -182,6 +182,30 @@ class ConversationServiceTest {
   }
 
   @Test
+  void expiredOrClearedConversationIgnoresLateTranslationEvent() {
+    var now = java.time.Instant.parse("2026-10-12T00:00:00Z");
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "clock", java.time.Clock.fixed(now, java.time.ZoneOffset.UTC));
+    var view = service.create("w");
+    service.commit(view.conversationId(), 0, "job", result("question"));
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "clock", java.time.Clock.fixed(now.plusSeconds(7201), java.time.ZoneOffset.UTC));
+    var event =
+        new jp.cheapreview.generation.event.TranslationDisplayUpdated(
+            "job", result("q").answerEnglish(), false);
+    org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.translated(event));
+    assertThrows(ResponseStatusException.class, () -> service.get(view.conversationId()));
+    var fresh = service.create("w");
+    service.commit(fresh.conversationId(), 0, "fresh", result("q"));
+    service.delete(fresh.conversationId());
+    org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+        () ->
+            service.translated(
+                new jp.cheapreview.generation.event.TranslationDisplayUpdated(
+                    "fresh", result("q").answerEnglish(), true)));
+  }
+
+  @Test
   void httpsIsExportableButWindowsDriveAndUncPathsAreRejected() {
     var view = service.create("w");
     service.commit(view.conversationId(), 0, "url", result("See https://example.com/docs"));

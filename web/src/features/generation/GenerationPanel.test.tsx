@@ -6,6 +6,7 @@ import {
   generationError,
   sourceLabel,
   generationDiagnostics,
+  conversationRefreshKey,
   translationError,
 } from "./GenerationPanel";
 import { canGenerate, type GenerationJob } from "../../types/generation";
@@ -210,4 +211,37 @@ describe("Gemini generation controls", () => {
     );
     expect(translationError("TRANSLATION_TIMEOUT")).toContain("英語原文");
   });
+});
+
+it("refreshes committed history during translation and again when display changes", () => {
+  const generating = {
+    jobId: "j",
+    state: "GENERATING",
+    result: null,
+  } as GenerationJob;
+  expect(conversationRefreshKey(generating)).toBe("");
+  const translating = {
+    ...generating,
+    state: "TRANSLATING",
+    result: {},
+  } as GenerationJob;
+  expect(conversationRefreshKey(translating)).not.toBe("");
+  expect(conversationRefreshKey({ ...translating })).toBe(
+    conversationRefreshKey(translating),
+  );
+  const failed = {
+    ...translating,
+    state: "TRANSLATION_FAILED",
+    translation: { attempt: 1, status: "FAILED" },
+  } as GenerationJob;
+  expect(conversationRefreshKey(failed)).not.toBe(
+    conversationRefreshKey(translating),
+  );
+  const retrying = {
+    ...failed,
+    translation: { attempt: 2, status: "RUNNING" },
+  } as GenerationJob;
+  expect(conversationRefreshKey(retrying)).not.toBe(
+    conversationRefreshKey(failed),
+  );
 });

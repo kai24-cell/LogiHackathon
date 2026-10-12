@@ -240,9 +240,7 @@ public class GenerationService {
               null,
               cancelled);
       if (entry.translationRunning && entry.future != null) entry.future.cancel(true);
-      events.publishEvent(
-          new TranslationDisplayUpdated(
-              id, cancelled.displayAnswer(), true));
+      events.publishEvent(new TranslationDisplayUpdated(id, cancelled.displayAnswer(), true));
       return entry.view;
     }
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING) {
@@ -305,8 +303,12 @@ public class GenerationService {
         // 英語成功はここで一度だけ確定する。翻訳失敗・翻訳のみ中止でも履歴を失わない。
         // 通常生成cancel/clear済みならこの境界を通らず、翻訳の再試行ではcommitしない。
         if (conversations != null)
-          conversations.commit(entry.input.input().conversationId(), preview.conversationVersion(),
-              entry.view.jobId(), result);
+          conversations.commit(
+              entry.input.input().conversationId(),
+              preview.conversationVersion(),
+              entry.view.jobId(),
+              result);
+        // 240秒は生成期限。英語取得後は翻訳の待機で取得済み結果を失わないよう解除する。
         deadline.cancel(false);
         entry.translationSymbols = TranslationSymbols.from(preview.selectedChunks());
         transition(entry, State.TRANSLATING, null, result);
@@ -362,8 +364,10 @@ public class GenerationService {
               entry.view.jobId(), state, null, result, entry.view.createdAt(), null, translated);
       events.publishEvent(
           new TranslationDisplayUpdated(
-              entry.view.jobId(), translated.displayAnswer(),
-              translated.partialTranslation() || translated.status() == TranslationDtos.Status.FAILED));
+              entry.view.jobId(),
+              translated.displayAnswer(),
+              translated.partialTranslation()
+                  || translated.status() == TranslationDtos.Status.FAILED));
     }
   }
 

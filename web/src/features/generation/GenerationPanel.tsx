@@ -62,6 +62,13 @@ export function sourceLabel(source: string | undefined): string {
   return "ユーザー認証による実API（料金が発生する可能性があります）";
 }
 
+/** 英語確定と翻訳表示更新を区別し、翻訳中でも確定済みTXTを取得できるようにする。 */
+export function conversationRefreshKey(job: GenerationJob): string {
+  return job.result
+    ? `${job.jobId}:${job.state}:${job.translation?.attempt ?? 0}:${job.translation?.status ?? "none"}`
+    : "";
+}
+
 /** 外部のエラー本文を表示せず、定型コードから次の操作を示す。 */
 export function translationError(code: string): string {
   const messages: Record<string, string> = {
@@ -166,6 +173,7 @@ export function GenerationPanel({
     undefined,
   );
   const sendingRef = useRef(false);
+  const conversationNotification = useRef("");
   const settingsRequestVersion = useRef(0);
   const current = useRef({ input, preview, settings });
   current.current = { input, preview, settings };
@@ -222,6 +230,11 @@ export function GenerationPanel({
         const value = await api<GenerationJob>(`/jobs/${jobId}`);
         if (cancelled) return;
         setJob(value);
+        const notification = conversationRefreshKey(value);
+        if (notification && notification !== conversationNotification.current) {
+          conversationNotification.current = notification;
+          onCompleted?.();
+        }
         if (
           value.state !== "QUEUED" &&
           value.state !== "GENERATING" &&
@@ -229,7 +242,6 @@ export function GenerationPanel({
           value.translation?.status !== "RUNNING"
         ) {
           pending.current = undefined;
-          if (value.result) onCompleted?.();
           return;
         }
       } catch {
