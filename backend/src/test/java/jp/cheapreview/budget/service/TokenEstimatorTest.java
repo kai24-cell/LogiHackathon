@@ -111,6 +111,34 @@ class TokenEstimatorTest {
   }
 
   @Test
+  void bundledGeminiPriceKeepsDottedModelIdAndDisplaysRoundedCostBreakdown() throws Exception {
+    var properties = new java.util.Properties();
+    try (var stream = getClass().getResourceAsStream("/application.properties")) {
+      properties.load(stream);
+    }
+    var source = new org.springframework.core.env.PropertiesPropertySource("defaults", properties);
+    var bound =
+        new org.springframework.boot.context.properties.bind.Binder(
+                org.springframework.boot.context.properties.source.ConfigurationPropertySources
+                    .from(source))
+            .bind(
+                "cheapreview.budget",
+                org.springframework.boot.context.properties.bind.Bindable.of(BudgetSettings.class))
+            .get();
+
+    var estimator = new TokenEstimator(bound);
+    var cost = estimator.cost("gemini-3.8-flash", 1041);
+    assertEquals(new BigDecimal("0.75"), cost.inputPerMillion());
+    assertEquals(new BigDecimal("3.75"), cost.outputPerMillion());
+    assertEquals("USD", cost.currency());
+    assertEquals("2026-10-12", cost.checkedOn());
+    assertEquals(new BigDecimal("0.000781"), cost.inputCost());
+    assertEquals(new BigDecimal("0.007680"), cost.maximumOutputCost());
+    assertEquals(new BigDecimal("0.008461"), cost.total());
+    assertNull(estimator.cost("unconfigured-model", 1041));
+  }
+
+  @Test
   void exampleModelPricesBindFromPropertiesWithoutInventingDefaults() {
     var properties =
         new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(

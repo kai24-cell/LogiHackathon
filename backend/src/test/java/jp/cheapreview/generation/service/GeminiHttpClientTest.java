@@ -93,6 +93,25 @@ class GeminiHttpClientTest {
   }
 
   @Test
+  void usageKeepsAnswerAndThinkingSeparateWithoutAddingThinkingToProviderTotal() {
+    response =
+        """
+        {"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{}"}]}}],
+         "usageMetadata":{"promptTokenCount":613,"candidatesTokenCount":973,
+                          "thoughtsTokenCount":578,"totalTokenCount":2164}}
+        """;
+
+    var usage = generate().usage();
+    assertEquals(613L, usage.promptTokens());
+    assertEquals(973L, usage.outputTokens());
+    assertEquals(578L, usage.thoughtTokens());
+    assertEquals(2164L, usage.totalTokens());
+    assertEquals(
+        usage.totalTokens().longValue(),
+        usage.promptTokens() + usage.outputTokens() + usage.thoughtTokens());
+  }
+
+  @Test
   void realAdapterUsesHeadersSchemaLimitsAndExactlyOnePost() throws Exception {
     var reply = generate();
     assertEquals(1, posts.get());
