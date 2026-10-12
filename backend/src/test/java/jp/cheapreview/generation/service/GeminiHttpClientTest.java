@@ -34,6 +34,7 @@ class GeminiHttpClientTest {
   String response =
       "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"{\\\"summary\\\":\\\"ok\\\"}\"}]}}],\"usageMetadata\":{\"promptTokenCount\":12,\"totalTokenCount\":20}}";
   long delay;
+  String modelId = "fixture-model";
 
   @BeforeEach
   void setup() throws Exception {
@@ -41,14 +42,14 @@ class GeminiHttpClientTest {
     executor = Executors.newCachedThreadPool();
     server.setExecutor(executor);
     server.createContext(
-        "/v1beta/models/fixture-model",
+        "/v1beta/models/",
         exchange -> {
           try {
             keyHeader.set(exchange.getRequestHeaders().getFirst("x-goog-api-key"));
             assertNull(exchange.getRequestURI().getQuery());
             boolean post = exchange.getRequestMethod().equals("POST");
             assertEquals(
-                "/v1beta/models/fixture-model" + (post ? ":generateContent" : ""),
+                "/v1beta/models/" + modelId + (post ? ":generateContent" : ""),
                 exchange.getRequestURI().getPath());
             if (post) {
               posts.incrementAndGet();
@@ -82,7 +83,7 @@ class GeminiHttpClientTest {
   private GeminiClient.Reply generate() {
     return client.generate(
         new PromptMaterializer.Bundle("role", "{\"type\":\"object\"}", "日本語質問"),
-        new GenerationSettings.Credentials("fixture-model", "fake-only-key", "v"),
+        new GenerationSettings.Credentials(modelId, "fake-only-key", "v"),
         4800,
         2048);
   }
@@ -101,6 +102,29 @@ class GeminiHttpClientTest {
     assertEquals(12L, reply.usage().promptTokens());
     assertNull(reply.usage().outputTokens());
     assertEquals(20L, reply.usage().totalTokens());
+  }
+
+  @Test
+  void geminiThreeOmitsUnsupportedSamplingAndKeepsSchemaAndOutputLimit() throws Exception {
+    modelId = "gemini-3.8-flash";
+    generate();
+    var config = mapper.readTree(postBody.get()).path("generationConfig");
+    assertFalse(config.has("temperature"));
+    assertFalse(config.has("candidateCount"));
+    assertFalse(config.has("thinkingConfig"));
+    assertTrue(config.has("responseJsonSchema"));
+    assertEquals("application/json", config.path("responseMimeType").asText());
+    assertEquals(2048, config.path("maxOutputTokens").asInt());
+    assertEquals(1, posts.get());
+  }
+
+  @Test
+  void olderModelsKeepSamplingSettings() throws Exception {
+    modelId = "gemini-2.5-flash";
+    generate();
+    var config = mapper.readTree(postBody.get()).path("generationConfig");
+    assertEquals(0.2, config.path("temperature").asDouble());
+    assertEquals(1, config.path("candidateCount").asInt());
   }
 
   @Test

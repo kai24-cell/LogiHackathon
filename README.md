@@ -309,3 +309,12 @@ CIでは固定providerの3ケースのみ実行し、実API用のフラグや認
 翻訳は#8で実装します。`CHEAPREVIEW_GCP_PROJECT`と`GOOGLE_APPLICATION_CREDENTIALS`は予約設定で、
 今回は空欄で構いません。認証JSONは読みません。日本語期待fixtureは翻訳実績ではありません。
 検証結果・設計との差分は`docs/issue14-validation.md`を参照してください。
+
+2026-10-12に`gemini-3.8-flash`で通常アプリ経路の実生成1回が成功し、予算・回答schema・参照・実usageを確認しました。
+既存のgenerateContent／構造化出力に対応し、thinking設定を省略した場合の既定値はmediumです。
+モデル入力上限1,048,576、出力上限65,536に対し、本アプリの出力枠は2,048を維持します。
+[公式仕様](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)と
+[公式料金](https://ai.google.dev/gemini-api/docs/pricing)の確認日は2026-10-12です。
+Standard有料料金は100万トークンあたり入力USD 0.75、出力（thinking含む）USD 3.75で、2026-12-31までの導入価格です。
+2027-01-01以降は入力USD 1.50、出力USD 7.50が案内されているため、利用前に再確認してください。
+秘密情報のない`backend/config/application.example.properties`へコメント付き設定例を追加しました。既定料金は変更せず、未設定時は料金不明と表示します。

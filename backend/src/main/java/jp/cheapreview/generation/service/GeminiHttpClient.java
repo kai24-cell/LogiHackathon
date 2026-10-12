@@ -79,9 +79,13 @@ public class GeminiHttpClient implements GeminiClient {
     body.set("systemInstruction", content(prompt.system(), false));
     body.putArray("contents").add(content(prompt.contents(), true));
     var config = body.putObject("generationConfig");
-    config.put("temperature", 0.2);
+    // Gemini 3の移行仕様ではsampling設定が非推奨、candidateCountが非対応。
+    // thinkingは未指定のモデル既定値を使い、旧モデルの送信条件は維持する。
+    if (!model.startsWith("gemini-3.")) {
+      config.put("temperature", 0.2);
+      config.put("candidateCount", 1);
+    }
     config.put("maxOutputTokens", maximumOutputTokens);
-    config.put("candidateCount", 1);
     config.put("responseMimeType", "application/json");
     try {
       config.set("responseJsonSchema", mapper.readTree(prompt.schema()));

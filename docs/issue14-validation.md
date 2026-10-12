@@ -45,7 +45,7 @@ Interactions APIとgenerateContentのエラー形式は異なるため、別API�
 ## 確認状況
 
 - stub確認済み：正常・schema不正・timeoutのHTTP確認が成功。キー不要、nullable usage、通常予算・参照検証を確認。
-- 実API未確認：最初は設定読込でHTTP 400 / INVALID_DEMO_CONFIG、互換性修正後はHTTP 400 / INVALID_DEMO_KEYで停止。いずれもGemini通信は0回。モデルIDの入力形式は通過したが、モデル対応・利用制限は未確認。キー値は読取結果・ログ・報告・PRへ出力していない。
+- 実API確認済み：gemini-3.8-flashで通常生成・予算・schema・参照・usage確認成功（英語表現の目視は未確認）。過去の設定失敗：最初は設定読込でHTTP 400 / INVALID_DEMO_CONFIG、互換性修正後はHTTP 400 / INVALID_DEMO_KEYで停止。いずれもGemini通信は0回。モデルIDの入力形式は通過したが、モデル対応・利用制限は未確認。キー値は読取結果・ログ・報告・PRへ出力していない。
 - 未確認：実ブラウザ/実VS Code操作、配布ZIPの展開受入、翻訳（#8）、日本語期待fixtureの実翻訳との比較。
 
 翻訳は英語構造化回答・参照表・source・nullable usageを引き継ぐ。日本語fixtureは期待データのみで今回の翻訳成功を意味しない。
@@ -78,6 +78,31 @@ verify_api.ps1をUTF-8 BOM付きに変更し、CIの固定生成3ケースもWin
 修正後にPS5.1のラッパー経由でnormal/invalid/timeoutの3ケース成功。reviewerもBOMとCI設定を確認し、追加指摘なし。
 
 ## デモキーの独自検証修正と実API1回の確認
+
+### 新モデルの通常経路受入確認（2026-10-12）
+
+利用者が.envのモデルをgemini-3.8-flashへ変更した後、新規バックエンドプロセスで設定を読み込んだ。.envの編集・内容出力は行っていない。`verify_api.ps1 -Jar .cache/issue14-validation/backend/target/cheapreview-0.1.0.jar -Real -AllowPaidApi -Port 18768`を1回実行し、通常の走査・解析・検索・preview予算検証・生成・バックエンドschema／参照検証が成功した。再試行・モデル代替は0回。
+
+実usageは入力639、回答出力534、thinking425、合計1,598トークン。キャッシュ値は提供されずnull。英語回答を求める既存system／末尾指示を送信し、構造化回答のsummary存在と参照ID整合を確認した。ただし検証スクリプトは説明文の言語そのものを判定せず、回答全文も保持・表示していないため、英語表現の目視受入は未確認とする。追加通信で確認し直していない。
+
+[公式モデル仕様](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)、[generateContent仕様とthinking既定値](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)、[構造化出力](https://ai.google.dev/gemini-api/docs/generate-content/structured-output)、[公式料金](https://ai.google.dev/gemini-api/docs/pricing)を2026-10-12に確認した。既存v1beta generateContent・responseJsonSchemaに対応し、thinkingは未指定時medium。minimalは非対応のため追加しない。モデル上限は入力1,048,576／出力65,536。アプリ出力枠2,048は維持し、モデル情報GETによる上限照合も通常経路で通過した。generateContent APIと計算式は維持する。送信パラメータの修正については以下のレビュー対応を参照。
+
+Standard有料導入価格は入力USD 0.75／100万、出力USD 3.75／100万（thinkingを含む）、2026-12-31まで。2027-01-01以降はUSD 1.50／7.50。コメント付き料金設定例を追加したが、既定料金や.envは変更していない。今回の実usageに導入価格を適用した参考額は `(639×0.75 + (534+425)×3.75)/1,000,000 = USD 0.0040755`。合計tokenへ出力単価を掛けず、thinkingも二重計上しない。無料枠・契約・請求の確認は未実施で、実請求額ではない。
+
+実ブラウザ／VS Code、翻訳、英語表現の目視、請求の確認は未確認。CIと追加の自動検証はstubのみを使う。
+
+専用reviewerが公式移行条件との不一致を指摘したため、Gemini 3系では非推奨temperatureと非対応candidateCountを省略する修正と送信JSONのstub回帰テストを追加した。旧モデルの設定、schema、出力枠、thinking未指定は維持する。実APIの成功はこの修正前の状態であり、修正後の実API再実行はしていない。generateContent自体や計算式の変更は不要だが、送信パラメータの変更が必要だったことを区別する。
+
+修正後のJava 21／Maven Wrapperオフラインverify（Spotless check、JUnit 136件、jar生成）成功。Webのformat:check／lint／typecheck／test -- --run（32件）／build成功。最初のsandbox実行ではJUnit一時フォルダとesbuild親フォルダアクセスが拒否されたため、承認された再実行で成功を確認した。git diff --check成功。専用reviewerは設定例・料金算術・互換性・関連テストを確認し、送信パラメータと古い確認状況の2指摘に対応後の再レビューで追加指摘なし。.envの読取や実API通信をreviewerに行わせていない。
+
+### 生成404の追加切り分け（2026-10-12）
+
+- GETは `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash`、POSTは同じURLの末尾に `:generateContent` を追加する。ホスト・APIバージョン・モデルIDは一致する。モデルIDの入力検証では `/` や `:` を拒否するため、`models/` の二重付与はなく、このIDではURLエンコードも不要。既存HTTP clientのstubテストでGET/POSTの正確なパスを確認済み。
+- 同じローカル設定のキー・v1betaによるモデル一覧GETはHTTP 200。対象の `version` は `001`、`supportedGenerationMethods` は `generateContent`、`countTokens`、`createCachedContent`、`batchGenerateContent`。入力上限1,048,576、出力上限65,536。一覧への掲載・メソッド対応は、この利用者による実生成の可否を保証しない。
+- 利用者が許可した追加1回は、アプリ外の最小比較POSTとして専用サンプル・既存system指示・回答schemaを使って実施。HTTP 404 / NOT_FOUND。Googleのmessageは、対象モデルが **新規利用者には利用できない** と説明している。アプリの `MODEL_NOT_FOUND` への変換だけから推測した結論ではない。URL組み立ての不具合ではなく、対象モデルの利用条件による拒否を確認した。
+- Google応答は `models/gemini-3.8-flash` とInteractions APIを案内している。ただし、これは今回のエラー応答の案内であり、候補モデルの料金・本アプリのgenerateContent/schema互換性を確認した結果ではない。モデルやAPIを自動変更しない。
+- この追加比較で生成POSTは1回、再試行は0回。キー・認証ヘッダー・送信本文・生レスポンス全文を出力／保存していない。モデル一覧取得と比較は明示的なローカル診断で行い、CIには追加しない。
+- この比較は通常アプリの予算・参照検証を含む受入試験の代替ではない。実生成成功、実回答のschema・参照検証、usage・費用は未確認。モデル変更後の通常アプリ経路での実API確認には、別途利用者の実行指示が必要。今回はアプリの処理変更なし、既存ユーザー変更も保持した。
 
 追加のHTTP client stub 7テストとSpotless check成功。修正済みjarの固定normal/invalid/timeoutも成功（実APIへの追加通信なし）。
 
