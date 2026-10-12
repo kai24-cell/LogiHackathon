@@ -11,6 +11,12 @@ export class ApiFailure extends Error {
 }
 
 const safeCodes = new Set([
+  "DEMO_NOT_CONFIGURED",
+  "INVALID_DEMO_CONFIG",
+  "INVALID_DEMO_MODEL",
+  "INVALID_DEMO_KEY",
+  "STUB_ONLY_MODE",
+  "STUB_NOT_ENABLED",
   "INVALID_CONNECTION",
   "INVALID_ORIGIN",
   "INVALID_SETTINGS",

@@ -154,7 +154,8 @@ public class GenerationService {
   /** 固定入力・マスク済みpromptを一度だけ生成し、後続翻訳が使う英語DTOを保持する。 */
   private void generate(
       Entry entry, BudgetPreview.Result preview, GenerationSettings.Credentials credentials) {
-    var deadline = deadlines.schedule(() -> timeout(entry), 240, TimeUnit.SECONDS);
+    var diagnostic = new GenerationDiagnostics(GenerationDtos.ApiStage.JOB);
+    var deadline = deadlines.schedule(() -> timeout(entry, diagnostic), 240, TimeUnit.SECONDS);
     long started = System.nanoTime();
     try {
       synchronized (this) {
@@ -193,16 +194,18 @@ public class GenerationService {
               preview.snapshotId(),
               entry.input.input().question(),
               entry.input.input().mode(),
-              entry.input.input().workspaceId());
+              entry.input.input().workspaceId(),
+              credentials.source());
       synchronized (this) {
         if (entry.view.state() == State.GENERATING)
           transition(entry, State.SUCCEEDED, null, result);
       }
     } catch (GenerationFailure failure) {
-      fail(entry, failure.getMessage());
+      fail(entry, failure.getMessage(), failure.details());
     } catch (Exception exception) {
       fail(entry, "GENERATION_FAILED");
     } finally {
+      diagnostic.end();
       deadline.cancel(false);
       synchronized (this) {
         if (entry.view.jobId().equals(active)) active = null;
@@ -210,16 +213,23 @@ public class GenerationService {
     }
   }
 
-  private synchronized void timeout(Entry entry) {
+  private synchronized void timeout(Entry entry, GenerationDiagnostics diagnostic) {
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING) {
-      transition(entry, State.FAILED, "GENERATION_TIMEOUT", null);
+      var failure = diagnostic.timeout(GenerationDtos.TimeoutType.JOB_DEADLINE);
+      fail(entry, failure.getMessage(), failure.details());
       if (entry.future != null) entry.future.cancel(true);
     }
   }
 
   private synchronized void fail(Entry entry, String code) {
+    fail(entry, code, null);
+  }
+
+  private synchronized void fail(Entry entry, String code, GenerationDtos.ErrorDetails details) {
     if (entry.view.state() == State.QUEUED || entry.view.state() == State.GENERATING)
-      transition(entry, State.FAILED, code, null);
+      entry.view =
+          new GenerationDtos.Job(
+              entry.view.jobId(), State.FAILED, code, null, entry.view.createdAt(), details);
   }
 
   private void transition(Entry entry, State state, String code, GenerationDtos.Result result) {

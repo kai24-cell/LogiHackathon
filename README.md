@@ -242,6 +242,7 @@ Git管理対象に実キー・認証JSONを入れないでください。作成�
 
 ## Design deviations
 
+- Issue #14はユーザー決定により#8前に、固定応答とローカルデモ認証・実API検証基盤を先行しました。翻訳本体は#8へ残します。Git除外の.envはユーザーが作る専用ローカル設定で、アプリによるキーのファイル保存は行いません。通常起動・CIは.envを読みません。検証状況はdocs/issue14-validation.mdを参照してください。
 - Issue #7は初回質問の英語生成まで。翻訳未実装のため英語回答を明示表示し、日本語直接生成の切替は設けません。履歴・TXT・デモ認証は各後続Issueへ分離します。
 - Issue #7の秘密情報処理は名前付き認証リテラル等のマスクと疑わしい情報の送信停止です。任意名・分割・エンコードされた秘密を完全検出する保証はなく、送信前のpreview確認が必要です。
 
@@ -266,3 +267,61 @@ Git管理対象に実キー・認証JSONを入れないでください。作成�
 PowerShellスクリプトはWindows PowerShell 5.1で日本語を正しく扱うためUTF-8 BOM付きで保存しています。
 
 検証結果と手動確認の状況は [検証記録](docs/issue02-validation.md) に記載します。
+
+## 固定応答・デモ認証・実API確認（Issue #14）
+
+ビルド後、`scripts/start.ps1 -Stub`（開発時はさらに `-Dev`）で固定応答モードを起動できます。
+`CheapReview: Open Web`で接続し、`samples/api-validation`を選んで走査します。
+OrderService.javaを選択し、質問を入力し、「固定応答を設定（APIキー不要）」を押します。
+入力トークン予算を8,192以上にして概算を取得し、「固定応答で生成」を押してください。
+検索、予算、schema、参照検証は通常の生成処理と共通です。回答には固定応答と表示され、usageは未提供です。
+`-Scenario invalid`、`-Scenario timeout`で不正JSON／タイムアウトを確認できます。
+
+実API用はリポジトリ直下の `.env.example` を `.env` にコピーし、
+`CHEAPREVIEW_DEMO_MODEL` と `CHEAPREVIEW_DEMO_GEMINI_KEY` をローカルで設定します。
+値は `名前=値` 形式で、外側の単一／二重引用符とUTF-8 BOMも受け付けます。シェル展開は行いません。`.env`はGit・配布ZIPに含めません。
+キーは接頭辞や固定桁数で認証の有効性を判定せず、空でないprintable ASCIIとして受け付けます。空白・改行・制御文字は拒否し、4,096文字の上限はHTTPヘッダー・メモリ保護のためです。設定成功は入力受理であり、認証成功は実APIの応答で確認します。
+アプリは設定ファイルへ書き込まず、`scripts/start.ps1 -Demo`起動後の「デモ用認証を設定」操作でのみ読み込みます。
+キーはブラウザへ返さず、バックエンドのメモリ設定へ渡します。通常起動とstub起動は`.env`を読みません。
+これはユーザーが指定したローカル認証確認のための例外で、通常のWeb入力キーをファイルへ保存する機能ではありません。
+提出用ZIPでは認証は別途ローカル設定してください。モデルIDは秘密情報ではなく、画面で確認できます。
+
+明示的な検証コマンド（Java 21とPythonが必要、先に`scripts/build.ps1`）：
+
+```powershell
+.\scripts\verify_api.ps1
+.\scripts\verify_api.ps1 -Scenario invalid
+.\scripts\verify_api.ps1 -Scenario timeout
+# 以下だけ実APIを利用します。課金の可能性があります。
+.\scripts\verify_api.ps1 -Real -AllowPaidApi
+```
+
+専用サンプルで通常の走査→解析→検索→予算→生成→回答検証を通します。
+生成開始POSTは1回だけで、自動再試行・別モデルへの代替はありません。
+モデル情報のGETで生成対応と入出力上限を確認します。非対応、認証失敗、利用制限は固定エラーコードで報告します。
+APIキー・質問・コード・生応答・子プロセスのログは検証コマンドから出力しません。
+モデル・APIの失敗は、モデル情報取得／回答生成の段階、HTTPステータス、定型status、判明した時間単位の利用上限を表示します。
+404の原因がモデル廃止かAPIバージョンとの非互換かは断定せず、[公式の廃止情報](https://ai.google.dev/gemini-api/docs/deprecations)とモデルIDの確認を案内します。
+400の要求不正・前提不足、認証エラー、利用枠不足、支払い条件、サーバー内部障害は別の日本語エラーです。未知の詳細は未特定とし、生本文は表示しません。
+API提供のusageと独自推定値は区別し、未知料金を無料として扱いません。
+CIでは固定providerの3ケースのみ実行し、実API用のフラグや認証情報を使いません。
+
+翻訳は#8で実装します。`CHEAPREVIEW_GCP_PROJECT`と`GOOGLE_APPLICATION_CREDENTIALS`は予約設定で、
+今回は空欄で構いません。認証JSONは読みません。日本語期待fixtureは翻訳実績ではありません。
+検証結果・設計との差分は`docs/issue14-validation.md`を参照してください。
+
+2026-10-12に`gemini-3.8-flash`で通常アプリ経路の実生成1回が成功し、予算・回答schema・参照・実usageを確認しました。
+既存のgenerateContent／構造化出力に対応し、thinking設定を省略した場合の既定値はmediumです。
+モデル入力上限1,048,576、出力上限65,536に対し、本アプリの出力枠は2,048を維持します。
+[公式仕様](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)と
+[公式料金](https://ai.google.dev/gemini-api/docs/pricing)の確認日は2026-10-12です。
+Standard有料料金は100万トークンあたり入力USD 0.75、出力（thinking含む）USD 3.75で、2026-12-31までの導入価格です。
+2027-01-01以降は入力USD 1.50、出力USD 7.50が案内されているため、利用前に再確認してください。
+秘密情報のない`backend/config/application.example.properties`へコメント付き設定例を追加しました。既定料金は変更せず、未設定時は料金不明と表示します。
+
+タイムアウト診断は`API_DIAGNOSTIC`という固定形式で、モデル情報GET（MODEL_INFO）／生成POST（GENERATE）／ジョブ（JOB）の開始・終了時刻、経過msを記録します。
+HTTPヘッダー取得時にもステータスを記録し、本文の待機が止まった場合も取得済み値を残します。未取得のHTTP値はnullです。
+CONNECTはJavaが明示した接続タイムアウト、RESPONSE_WAITはヘッダー・本文を含む通信全体の待機期限、JOB_DEADLINEは240秒のジョブ期限です。
+RESPONSE_WAITだけで接続・モデル・利用上限の原因を断定しません。URL・モデルID・キー・認証ヘッダー・質問・送信コード・回答本文・例外メッセージは診断ログへ出しません。
+`verify_api.ps1`はこの固定形式だけを表示し、任意のバックエンドログは破棄します。画面とジョブ取得APIでも段階・タイムアウト種別・経過時間を確認できます。
+診断読取の回帰テストは`python -m unittest discover -s scripts/tests -p "test_*.py"`で実行します。読取障害は生例外を出さず`LOCAL_DIAGNOSTIC_ERROR`になり、CIでも外部通信なしで検証します。

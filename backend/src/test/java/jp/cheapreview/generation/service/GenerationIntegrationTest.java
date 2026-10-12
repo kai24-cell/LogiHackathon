@@ -154,6 +154,25 @@ class GenerationIntegrationTest {
   }
 
   @Test
+  void safeProviderDiagnosticsReachFailedJobWithoutRawErrorsOrSecrets() throws Exception {
+    var details =
+        new GenerationDtos.ErrorDetails(
+            404,
+            GenerationDtos.ApiStatus.NOT_FOUND,
+            GenerationDtos.ApiStage.MODEL_INFO,
+            GenerationDtos.LimitType.UNKNOWN);
+    when(provider.generate(any(), any(), anyLong(), anyLong()))
+        .thenThrow(new GenerationFailure("MODEL_NOT_FOUND", details));
+    var done = completed(generation.start(request(input(Mode.SERVICE_REVIEW, 8192))).jobId());
+    assertEquals(GenerationDtos.State.FAILED, done.state());
+    assertEquals("MODEL_NOT_FOUND", done.errorCode());
+    assertEquals(details, done.errorDetails());
+    assertNull(done.result());
+    assertFalse(mapper.writeValueAsString(done).contains(KEY));
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
   void runningInputIsFrozenAndConcurrentOrChangedIdReuseIsRejected() throws Exception {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);

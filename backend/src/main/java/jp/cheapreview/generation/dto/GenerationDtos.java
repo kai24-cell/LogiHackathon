@@ -29,6 +29,54 @@ public final class GenerationDtos {
     HIGH
   }
 
+  public enum ApiStage {
+    MODEL_INFO,
+    GENERATE,
+    JOB
+  }
+
+  public enum ApiStatus {
+    INVALID_ARGUMENT,
+    FAILED_PRECONDITION,
+    PERMISSION_DENIED,
+    UNAUTHENTICATED,
+    NOT_FOUND,
+    RESOURCE_EXHAUSTED,
+    UNAVAILABLE,
+    INTERNAL,
+    DEADLINE_EXCEEDED,
+    UNIMPLEMENTED,
+    UNKNOWN
+  }
+
+  public enum LimitType {
+    PER_MINUTE,
+    PER_DAY,
+    MULTIPLE,
+    UNKNOWN
+  }
+
+  /** 外部の任意文字列を保持せず、HTTP数値と定型enumだけを公開する。 */
+  public enum TimeoutType {
+    NONE,
+    CONNECT,
+    RESPONSE_WAIT,
+    JOB_DEADLINE
+  }
+
+  public record ErrorDetails(
+      Integer httpStatus,
+      ApiStatus apiStatus,
+      ApiStage stage,
+      LimitType limitType,
+      TimeoutType timeoutType,
+      Long elapsedMs) {
+    public ErrorDetails(
+        Integer httpStatus, ApiStatus apiStatus, ApiStage stage, LimitType limitType) {
+      this(httpStatus, apiStatus, stage, limitType, TimeoutType.NONE, null);
+    }
+  }
+
   public record Section(String title, String body, String code, List<String> referenceIds) {}
 
   public record Finding(
@@ -64,8 +112,18 @@ public final class GenerationDtos {
       String snapshotId,
       String question,
       jp.cheapreview.search.dto.CodeSearch.Mode mode,
-      String workspaceId) {}
+      String workspaceId,
+      SettingsDtos.Source source) {}
 
   public record Job(
-      String jobId, State state, String errorCode, Result result, Instant createdAt) {}
+      String jobId,
+      State state,
+      String errorCode,
+      Result result,
+      Instant createdAt,
+      ErrorDetails errorDetails) {
+    public Job(String jobId, State state, String errorCode, Result result, Instant createdAt) {
+      this(jobId, state, errorCode, result, createdAt, null);
+    }
+  }
 }

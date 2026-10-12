@@ -10,5 +10,18 @@ public final class SettingsDtos {
     }
   }
 
-  public record Status(String modelId, boolean configured, String version) {}
+  public enum Source {
+    NONE,
+    USER,
+    DEMO,
+    STUB
+  }
+
+  public record Status(
+      String modelId,
+      boolean configured,
+      String version,
+      Source source,
+      boolean demoAvailable,
+      boolean stubAvailable) {}
 }

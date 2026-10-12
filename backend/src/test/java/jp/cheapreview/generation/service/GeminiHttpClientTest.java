@@ -34,6 +34,9 @@ class GeminiHttpClientTest {
   String response =
       "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"{\\\"summary\\\":\\\"ok\\\"}\"}]}}],\"usageMetadata\":{\"promptTokenCount\":12,\"totalTokenCount\":20}}";
   long delay;
+  long postDelay;
+  boolean stallBody;
+  String modelId = "fixture-model";
 
   @BeforeEach
   void setup() throws Exception {
@@ -41,20 +44,25 @@ class GeminiHttpClientTest {
     executor = Executors.newCachedThreadPool();
     server.setExecutor(executor);
     server.createContext(
-        "/models/fixture-model",
+        "/v1beta/models/",
         exchange -> {
           try {
             keyHeader.set(exchange.getRequestHeaders().getFirst("x-goog-api-key"));
             assertNull(exchange.getRequestURI().getQuery());
             boolean post = exchange.getRequestMethod().equals("POST");
+            assertEquals(
+                "/v1beta/models/" + modelId + (post ? ":generateContent" : ""),
+                exchange.getRequestURI().getPath());
             if (post) {
               posts.incrementAndGet();
               postBody.set(
                   new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             }
             if (delay > 0) Thread.sleep(delay);
+            if (post && postDelay > 0) Thread.sleep(postDelay);
             byte[] bytes = (post ? response : metadata).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(post && status == 200 ? postStatus : status, bytes.length);
+            if (post && stallBody) Thread.sleep(1500);
             exchange.getResponseBody().write(bytes);
           } catch (Exception ignored) {
             /* timeout/cancel closes the test socket */
@@ -65,7 +73,9 @@ class GeminiHttpClientTest {
     server.start();
     client =
         new GeminiHttpClient(
-            mapper, URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/"), 1);
+            mapper,
+            URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1beta/"),
+            1);
   }
 
   @AfterEach
@@ -77,7 +87,7 @@ class GeminiHttpClientTest {
   private GeminiClient.Reply generate() {
     return client.generate(
         new PromptMaterializer.Bundle("role", "{\"type\":\"object\"}", "日本語質問"),
-        new GenerationSettings.Credentials("fixture-model", "fake-only-key", "v"),
+        new GenerationSettings.Credentials(modelId, "fake-only-key", "v"),
         4800,
         2048);
   }
@@ -96,6 +106,29 @@ class GeminiHttpClientTest {
     assertEquals(12L, reply.usage().promptTokens());
     assertNull(reply.usage().outputTokens());
     assertEquals(20L, reply.usage().totalTokens());
+  }
+
+  @Test
+  void geminiThreeOmitsUnsupportedSamplingAndKeepsSchemaAndOutputLimit() throws Exception {
+    modelId = "gemini-3.8-flash";
+    generate();
+    var config = mapper.readTree(postBody.get()).path("generationConfig");
+    assertFalse(config.has("temperature"));
+    assertFalse(config.has("candidateCount"));
+    assertFalse(config.has("thinkingConfig"));
+    assertTrue(config.has("responseJsonSchema"));
+    assertEquals("application/json", config.path("responseMimeType").asText());
+    assertEquals(2048, config.path("maxOutputTokens").asInt());
+    assertEquals(1, posts.get());
+  }
+
+  @Test
+  void olderModelsKeepSamplingSettings() throws Exception {
+    modelId = "gemini-2.5-flash";
+    generate();
+    var config = mapper.readTree(postBody.get()).path("generationConfig");
+    assertEquals(0.2, config.path("temperature").asDouble());
+    assertEquals(1, config.path("candidateCount").asInt());
   }
 
   @Test
@@ -121,18 +154,71 @@ class GeminiHttpClientTest {
   @Test
   void timeoutDoesNotRetryOrGenerate() {
     delay = 1500;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("GENERATION_TIMEOUT", failure.getMessage());
     assertEquals(
-        "GENERATION_TIMEOUT", assertThrows(GenerationFailure.class, this::generate).getMessage());
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO,
+        failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertNull(failure.details().httpStatus());
+    assertTrue(failure.details().elapsedMs() >= 900);
     assertEquals(0, posts.get());
+  }
+
+  @Test
+  void postTimeoutReportsStageAndDoesNotRetry() {
+    postDelay = 1500;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertNull(failure.details().httpStatus());
+    assertEquals(1, posts.get());
+  }
+
+  @Test
+  void bodyTimeoutPreservesReceivedHttpStatus() {
+    stallBody = true;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals(200, failure.details().httpStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertEquals(1, posts.get());
   }
 
   @Test
   void generationPostFailureIsNotRetried() {
     postStatus = 429;
     response = "fake-only-key provider-error";
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("GEMINI_RATE_LIMITED", failure.getMessage());
+    assertEquals(429, failure.details().httpStatus());
     assertEquals(
-        "GEMINI_RATE_LIMITED", assertThrows(GenerationFailure.class, this::generate).getMessage());
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
     assertEquals(1, posts.get());
+  }
+
+  @Test
+  void malformedMetadataErrorStillReportsStatusAndNeverGenerates() {
+    status = 404;
+    metadata = "fake-only-key not-json";
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("MODEL_NOT_FOUND", failure.getMessage());
+    assertEquals(404, failure.details().httpStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStatus.UNKNOWN,
+        failure.details().apiStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO,
+        failure.details().stage());
+    assertEquals(0, posts.get());
   }
 
   @Test
