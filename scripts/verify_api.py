@@ -11,6 +11,8 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 import uuid
+import re
+import threading
 
 ROOT = Path(__file__).resolve().parent.parent
 SAFE_CODES = {
@@ -25,6 +27,20 @@ SAFE_CODES = {
 
 class VerificationFailure(Exception):
     pass
+
+
+def consume_diagnostics(stream, emit, failed):
+    """定型ログのみ公開し、読取障害の生例外をスレッド外へ漏らさない。"""
+    pattern = re.compile(r"API_DIAGNOSTIC id=[0-9a-f-]{36} stage=(MODEL_INFO|GENERATE|JOB) "
+                         r"event=(START|HEADERS|TIMEOUT|END) at=[0-9TZ:.+-]+ elapsedMs=[0-9]+ "
+                         r"httpStatus=(null|[1-5][0-9]{2}) timeoutType=(NONE|CONNECT|RESPONSE_WAIT|JOB_DEADLINE)")
+    try:
+        for line in stream:
+            text = line.decode("utf-8", errors="replace").strip()
+            if pattern.fullmatch(text):
+                emit(text)
+    except Exception:
+        failed.set()
 
 
 def wait_for(read, complete, timeout):
@@ -59,7 +75,9 @@ def verify(args):
     environment["CHEAPREVIEW_DEV_ORIGIN"] = ""
     java = str(Path(environment["JAVA_HOME"]) / "bin/java.exe")
     command = [java, "-Djdk.httpclient.disableRetryConnect=true", "-jar", str(jar), f"--server.port={args.port}",
-               "--logging.level.root=OFF", "--spring.mvc.log-request-details=false"]
+               "--logging.level.root=OFF", "--spring.mvc.log-request-details=false",
+               "--logging.level.jp.cheapreview.generation.service.GenerationDiagnostics=INFO",
+               "--logging.pattern.console=%msg%n"]
     if args.real:
         command += ["--cheapreview.generation.provider=real",
                     f"--cheapreview.demo.config-path={ROOT / '.env'}"]
@@ -68,8 +86,12 @@ def verify(args):
                     f"--cheapreview.stub.scenario={args.scenario}"]
     # 子プロセスの生ログを破棄し、APIキー・入力コード・応答本文を出力しない。
     process = subprocess.Popen(command, cwd=ROOT, env=environment,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                creationflags=subprocess.CREATE_NO_WINDOW)
+    diagnostic_failed = threading.Event()
+    diagnostics = threading.Thread(target=consume_diagnostics,
+        args=(process.stdout, lambda text: print(text, flush=True), diagnostic_failed), daemon=True)
+    diagnostics.start()
     opener = build_opener(ProxyHandler({}))
 
     def call(path, body=None, authenticated=True):
@@ -164,6 +186,10 @@ def verify(args):
             status = details.get("apiStatus")
             limit = details.get("limitType")
             http = details.get("httpStatus")
+            timeout_type = details.get("timeoutType")
+            elapsed = details.get("elapsedMs")
+            if stage in {"MODEL_INFO", "GENERATE", "JOB"} and timeout_type in {"CONNECT", "RESPONSE_WAIT", "JOB_DEADLINE"}:
+                print(f"stage={stage} timeoutType={timeout_type} elapsedMs={elapsed if type(elapsed) is int else 'UNKNOWN'}")
             if stage in {"MODEL_INFO", "GENERATE"} and type(http) is int and 100 <= http <= 599:
                 statuses = {"INVALID_ARGUMENT", "FAILED_PRECONDITION", "PERMISSION_DENIED",
                             "UNAUTHENTICATED", "NOT_FOUND", "RESOURCE_EXHAUSTED", "UNAVAILABLE",
@@ -189,6 +215,9 @@ def verify(args):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+        diagnostics.join(timeout=2)
+        if diagnostic_failed.is_set() or diagnostics.is_alive():
+            raise VerificationFailure("LOCAL_DIAGNOSTIC_ERROR")
 
 
 def main():

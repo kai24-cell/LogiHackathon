@@ -79,6 +79,26 @@ verify_api.ps1をUTF-8 BOM付きに変更し、CIの固定生成3ケースもWin
 
 ## デモキーの独自検証修正と実API1回の確認
 
+### タイムアウト診断の追加（実API通信なし）
+
+677eaf6での追加実API確認はGENERATION_TIMEOUTで終了し、回答ファイルは未作成だった。当時の検証スクリプトは子プロセスstdout/stderrを破棄し、HttpClientタイムアウト／240秒ジョブ期限の両方を同じ固定コードかつ詳細なしで返した。そのため、既存結果からGET／POST・接続／応答待ち／ジョブ期限を確定することはできない。過去の原因を新しい実装から推測しない。
+
+診断専用クラスは段階enum・ランダム診断ID・UTC時刻・単調時計による経過ms・HTTP数値・timeout enumだけを受け付ける。START／HEADERS／TIMEOUT／ENDをログへ記録し、ヘッダー取得済みなら本文停止時もHTTP値を保持する。TIMEOUTは期限到達時に記録し、キャンセル完了を待たない。キー・URL・本文・モデル・例外メッセージは受け取らない。CONNECTはHttpConnectTimeoutExceptionのみ、RESPONSE_WAITはヘッダー／本文を含む総待機上限、JOB_DEADLINEは240秒のジョブ期限とする。受信していないHTTP値はnullであり0や成功を補わない。接続例外がない総期限から接続原因は断定しない。
+
+ジョブエラー詳細とWeb表示にstage・timeoutType・elapsedMsを追加した。既存HTTPエラーの定型情報は保持する。検証スクリプトは専用ログカテゴリだけを有効化し、許可された固定書式の行のみstdoutへ表示する。任意のログ・生例外・stderrを通さない。今回は実API通信・.env読取／編集・回答本文保存・コミット／pushを実施しない。
+
+ローカルHTTP stubでモデルGETのヘッダー待ち、生成POSTのヘッダー待ち、HTTP 200ヘッダー取得後の本文停止と無再送を検証する。接続例外の分類は合成例外で確認し、外部ネットワークの接続障害を再現しない。ジョブ期限の診断値・固定ログのテストを追加し、実時間240秒のジョブ期限受入は未実施とする。
+
+最終Java verifyは140テスト、失敗0・エラー0、Spotless check・jar生成成功。Web format:check／lint／typecheck／32テスト／build成功。Python構文検証とgit diff --check成功。実際の外部接続タイムアウトと240秒ジョブ期限の通し試験は未実施で、今回の修正から前回の失敗箇所を確定したとは扱わない。
+
+最新jarの固定provider正常・schema不正・timeoutの3ケース成功。検証コマンドが許可されたJOBのSTART／END行だけを表示することを確認した。固定providerは外部HTTPを実行しないため、この3ケースのログにMODEL_INFO／GENERATEがないことは正常。GET／POSTの診断は別途HttpServer stubの回帰テストで確認している。
+
+### 診断追加後の許可済み実確認とレビュー
+
+修正済みjarで許可された検証コマンドを1回実行したが、回答保存用のローカル補助スクリプトの局所import reが診断スレッドのスコープ不具合を起こし、その後LOCAL_VERIFICATION_ERRORで停止した。回答ファイルは未作成で、実APIの段階・timeout種別・経過時間・HTTP値・回答・usageを確定できる記録も取得できなかった。再送は行わず、外部通信の到達回数も推測で補わない。これはGoogleのモデル／利用上限エラーを確認した結果ではない。実API受入は未確認のまま。
+
+ローカル補助の局所importを除去し、stub専用回答ファイルへの保存確認が成功した（実回答ではない）。tracked検証スクリプトにも診断スレッド例外を固定状態として親へ伝える処理を追加し、LOCAL_DIAGNOSTIC_ERRORを検証失敗として扱う。許可された行の抽出・秘密情報を含む例外の非表示のPythonテスト2件成功、CIへ追加した。レビュー／再レビューで確実な追加不具合なし。240秒ジョブ期限から取消・active解放までの通し回帰は低優先の後続課題とし、未確認を維持する。実APIの再送・モデル変更・期限変更・.env編集はしていない。
+
 ### 新モデルの通常経路受入確認（2026-10-12）
 
 利用者が.envのモデルをgemini-3.8-flashへ変更した後、新規バックエンドプロセスで設定を読み込んだ。.envの編集・内容出力は行っていない。`verify_api.ps1 -Jar .cache/issue14-validation/backend/target/cheapreview-0.1.0.jar -Real -AllowPaidApi -Port 18768`を1回実行し、通常の走査・解析・検索・preview予算検証・生成・バックエンドschema／参照検証が成功した。再試行・モデル代替は0回。

@@ -40,6 +40,17 @@ describe("Gemini generation controls", () => {
       limitType: "PER_DAY",
     });
     expect(text).toContain("HTTP 429");
+    const timeout = generationDiagnostics({
+      httpStatus: null,
+      apiStatus: "UNKNOWN",
+      stage: "JOB",
+      limitType: "UNKNOWN",
+      timeoutType: "JOB_DEADLINE",
+      elapsedMs: 240000,
+    });
+    expect(timeout).toContain("ジョブ期限超過");
+    expect(timeout).toContain("経過 240000 ms");
+    expect(timeout).toContain("HTTP 未特定");
     expect(text).toContain("日単位");
     expect(text).toContain("回答生成");
     expect(

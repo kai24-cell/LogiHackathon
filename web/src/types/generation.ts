@@ -37,9 +37,11 @@ export interface GenerationJob {
   state: "QUEUED" | "GENERATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
   errorCode: string | null;
   errorDetails?: {
-    httpStatus: number;
+    httpStatus: number | null;
     apiStatus: string;
-    stage: "MODEL_INFO" | "GENERATE";
+    stage: "MODEL_INFO" | "GENERATE" | "JOB";
+    timeoutType?: "NONE" | "CONNECT" | "RESPONSE_WAIT" | "JOB_DEADLINE";
+    elapsedMs?: number | null;
     limitType: "PER_MINUTE" | "PER_DAY" | "MULTIPLE" | "UNKNOWN";
   } | null;
   result: {

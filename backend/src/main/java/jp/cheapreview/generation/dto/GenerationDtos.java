@@ -31,7 +31,8 @@ public final class GenerationDtos {
 
   public enum ApiStage {
     MODEL_INFO,
-    GENERATE
+    GENERATE,
+    JOB
   }
 
   public enum ApiStatus {
@@ -56,8 +57,25 @@ public final class GenerationDtos {
   }
 
   /** 外部の任意文字列を保持せず、HTTP数値と定型enumだけを公開する。 */
+  public enum TimeoutType {
+    NONE,
+    CONNECT,
+    RESPONSE_WAIT,
+    JOB_DEADLINE
+  }
+
   public record ErrorDetails(
-      int httpStatus, ApiStatus apiStatus, ApiStage stage, LimitType limitType) {}
+      Integer httpStatus,
+      ApiStatus apiStatus,
+      ApiStage stage,
+      LimitType limitType,
+      TimeoutType timeoutType,
+      Long elapsedMs) {
+    public ErrorDetails(
+        Integer httpStatus, ApiStatus apiStatus, ApiStage stage, LimitType limitType) {
+      this(httpStatus, apiStatus, stage, limitType, TimeoutType.NONE, null);
+    }
+  }
 
   public record Section(String title, String body, String code, List<String> referenceIds) {}
 

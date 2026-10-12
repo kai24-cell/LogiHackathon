@@ -318,3 +318,10 @@ CIでは固定providerの3ケースのみ実行し、実API用のフラグや認
 Standard有料料金は100万トークンあたり入力USD 0.75、出力（thinking含む）USD 3.75で、2026-12-31までの導入価格です。
 2027-01-01以降は入力USD 1.50、出力USD 7.50が案内されているため、利用前に再確認してください。
 秘密情報のない`backend/config/application.example.properties`へコメント付き設定例を追加しました。既定料金は変更せず、未設定時は料金不明と表示します。
+
+タイムアウト診断は`API_DIAGNOSTIC`という固定形式で、モデル情報GET（MODEL_INFO）／生成POST（GENERATE）／ジョブ（JOB）の開始・終了時刻、経過msを記録します。
+HTTPヘッダー取得時にもステータスを記録し、本文の待機が止まった場合も取得済み値を残します。未取得のHTTP値はnullです。
+CONNECTはJavaが明示した接続タイムアウト、RESPONSE_WAITはヘッダー・本文を含む通信全体の待機期限、JOB_DEADLINEは240秒のジョブ期限です。
+RESPONSE_WAITだけで接続・モデル・利用上限の原因を断定しません。URL・モデルID・キー・認証ヘッダー・質問・送信コード・回答本文・例外メッセージは診断ログへ出しません。
+`verify_api.ps1`はこの固定形式だけを表示し、任意のバックエンドログは破棄します。画面とジョブ取得APIでも段階・タイムアウト種別・経過時間を確認できます。
+診断読取の回帰テストは`python -m unittest discover -s scripts/tests -p "test_*.py"`で実行します。読取障害は生例外を出さず`LOCAL_DIAGNOSTIC_ERROR`になり、CIでも外部通信なしで検証します。

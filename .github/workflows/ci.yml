@@ -62,6 +62,9 @@ jobs:
       - name: Test packaged Web and workspace integration on Windows
         run: python scripts/smoke_test.py
 
+      - name: Test safe diagnostic reader without external communication
+        run: python -m unittest discover -s scripts/tests -p "test_*.py"
+
       # Fixed providers have no HTTP client. Never activate local credentials
       # or pass --real / --allow-paid-api in CI.
       - name: Test normal and failed generation with fixed providers

@@ -67,7 +67,11 @@ export function generationDiagnostics(
   details: GenerationJob["errorDetails"],
 ): string {
   if (!details) return "";
-  const stages = { MODEL_INFO: "モデル情報取得", GENERATE: "回答生成" };
+  const stages = {
+    MODEL_INFO: "モデル情報取得",
+    GENERATE: "回答生成",
+    JOB: "生成ジョブ",
+  };
   const limits = {
     PER_MINUTE: "分単位の利用上限",
     PER_DAY: "日単位の利用上限",
@@ -88,6 +92,7 @@ export function generationDiagnostics(
     "UNKNOWN",
   ]);
   const http =
+    typeof details.httpStatus === "number" &&
     Number.isInteger(details.httpStatus) &&
     details.httpStatus >= 100 &&
     details.httpStatus <= 599
@@ -96,7 +101,18 @@ export function generationDiagnostics(
   const status = statuses.has(details.apiStatus)
     ? details.apiStatus
     : "UNKNOWN";
-  return `${stages[details.stage] ?? "失敗箇所は未特定"}：HTTP ${http} / ${status}。${limits[details.limitType] ?? "制限の内訳は未特定"}。`;
+  const timeouts = {
+    CONNECT: "接続タイムアウト",
+    RESPONSE_WAIT: "応答待ちタイムアウト（ヘッダー・本文の待機を含む）",
+    JOB_DEADLINE: "ジョブ期限超過",
+    NONE: "",
+  };
+  const timeout = details.timeoutType ? timeouts[details.timeoutType] : "";
+  const elapsed =
+    typeof details.elapsedMs === "number"
+      ? `経過 ${details.elapsedMs} ms。`
+      : "";
+  return `${stages[details.stage] ?? "失敗箇所は未特定"}：HTTP ${http} / ${status}。${limits[details.limitType] ?? "制限の内訳は未特定"}。${timeout ? `${timeout}。` : ""}${elapsed}`;
 }
 
 /** 送信時の入力を固定する。編集は許可し、ポーリングでは生成APIを再送しない。 */

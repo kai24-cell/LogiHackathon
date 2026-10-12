@@ -34,6 +34,8 @@ class GeminiHttpClientTest {
   String response =
       "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"{\\\"summary\\\":\\\"ok\\\"}\"}]}}],\"usageMetadata\":{\"promptTokenCount\":12,\"totalTokenCount\":20}}";
   long delay;
+  long postDelay;
+  boolean stallBody;
   String modelId = "fixture-model";
 
   @BeforeEach
@@ -57,8 +59,10 @@ class GeminiHttpClientTest {
                   new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             }
             if (delay > 0) Thread.sleep(delay);
+            if (post && postDelay > 0) Thread.sleep(postDelay);
             byte[] bytes = (post ? response : metadata).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(post && status == 200 ? postStatus : status, bytes.length);
+            if (post && stallBody) Thread.sleep(1500);
             exchange.getResponseBody().write(bytes);
           } catch (Exception ignored) {
             /* timeout/cancel closes the test socket */
@@ -150,9 +154,43 @@ class GeminiHttpClientTest {
   @Test
   void timeoutDoesNotRetryOrGenerate() {
     delay = 1500;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals("GENERATION_TIMEOUT", failure.getMessage());
     assertEquals(
-        "GENERATION_TIMEOUT", assertThrows(GenerationFailure.class, this::generate).getMessage());
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO,
+        failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertNull(failure.details().httpStatus());
+    assertTrue(failure.details().elapsedMs() >= 900);
     assertEquals(0, posts.get());
+  }
+
+  @Test
+  void postTimeoutReportsStageAndDoesNotRetry() {
+    postDelay = 1500;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertNull(failure.details().httpStatus());
+    assertEquals(1, posts.get());
+  }
+
+  @Test
+  void bodyTimeoutPreservesReceivedHttpStatus() {
+    stallBody = true;
+    var failure = assertThrows(GenerationFailure.class, this::generate);
+    assertEquals(200, failure.details().httpStatus());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE, failure.details().stage());
+    assertEquals(
+        jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT,
+        failure.details().timeoutType());
+    assertEquals(1, posts.get());
   }
 
   @Test

@@ -106,6 +106,11 @@ public class GeminiHttpClient implements GeminiClient {
 
   /** 生のHTTPエラーはキーやコードを含み得るため、固定コードへ変換して破棄する。 */
   private JsonNode exchange(String path, String body, String key) {
+    var diagnostic =
+        new GenerationDiagnostics(
+            body == null
+                ? jp.cheapreview.generation.dto.GenerationDtos.ApiStage.MODEL_INFO
+                : jp.cheapreview.generation.dto.GenerationDtos.ApiStage.GENERATE);
     try {
       var builder =
           HttpRequest.newBuilder(base.resolve(path))
@@ -114,20 +119,28 @@ public class GeminiHttpClient implements GeminiClient {
               .header("Content-Type", "application/json");
       if (body == null) builder.GET();
       else builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-      var pending = http.sendAsync(builder.build(), ignored -> new LimitedBody());
+      var pending =
+          http.sendAsync(
+              builder.build(),
+              info -> {
+                // 本文の停止時も、すでに到着したHTTPステータスを失わない。
+                diagnostic.headers(info.statusCode());
+                return new LimitedBody();
+              });
       HttpResponse<String> response;
       try {
         // ヘッダー到着後にbodyが停止する場合も、通信全体へtimeoutを適用する。
         response = pending.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
       } catch (java.util.concurrent.TimeoutException exception) {
         pending.cancel(true);
-        throw new GenerationFailure("GENERATION_TIMEOUT");
+        throw diagnostic.timeout(
+            jp.cheapreview.generation.dto.GenerationDtos.TimeoutType.RESPONSE_WAIT);
       } catch (InterruptedException exception) {
         pending.cancel(true);
         throw exception;
       } catch (java.util.concurrent.ExecutionException exception) {
         if (exception.getCause() instanceof java.net.http.HttpTimeoutException)
-          throw new GenerationFailure("GENERATION_TIMEOUT");
+          throw diagnostic.timeout(GenerationDiagnostics.classifyTimeout(exception.getCause()));
         throw new GenerationFailure("GEMINI_UNAVAILABLE");
       }
       int status = response.statusCode();
@@ -155,6 +168,8 @@ public class GeminiHttpClient implements GeminiClient {
       throw new GenerationFailure("CANCELLED");
     } catch (Exception exception) {
       throw new GenerationFailure("GEMINI_UNAVAILABLE");
+    } finally {
+      diagnostic.end();
     }
   }
 
