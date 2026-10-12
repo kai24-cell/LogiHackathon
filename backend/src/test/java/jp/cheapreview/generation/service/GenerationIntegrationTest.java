@@ -146,6 +146,43 @@ class GenerationIntegrationTest {
   }
 
   @Test
+  void previewReturnsConfiguredGeminiPriceBreakdownWithoutExternalCalls() throws Exception {
+    var pricedInput =
+        new BudgetPreview.Request(
+            workspace,
+            snapshot,
+            "説明して",
+            Mode.SERVICE_REVIEW,
+            List.of(file),
+            8192,
+            "gemini-3.8-flash",
+            null,
+            null,
+            1);
+
+    mvc.perform(
+            post("/api/v1/analysis/preview")
+                .header("Host", "127.0.0.1:8765")
+                .header("Origin", "http://127.0.0.1:8765")
+                .header("X-CheapReview-Token", "a".repeat(64))
+                .contentType("application/json")
+                .content(mapper.writeValueAsBytes(pricedInput)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.estimatedCost.currency").value("USD"))
+        .andExpect(jsonPath("$.estimatedCost.inputPerMillion").value(0.75))
+        .andExpect(jsonPath("$.estimatedCost.outputPerMillion").value(3.75))
+        .andExpect(jsonPath("$.estimatedCost.checkedOn").value("2026-10-12"))
+        .andExpect(jsonPath("$.estimatedCost.inputCost").isNumber())
+        .andExpect(jsonPath("$.estimatedCost.maximumOutputCost").value(0.007680))
+        .andExpect(jsonPath("$.estimatedCost.total").isNumber())
+        .andExpect(
+            jsonPath(
+                "$.warnings",
+                org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.containsString("思考"))));
+    verifyNoInteractions(provider, translator);
+  }
+
+  @Test
   void translationFailureRetainsEnglishAndRetryDoesNotCallGeminiAgain() throws Exception {
     when(translator.translate(any()))
         .thenThrow(
