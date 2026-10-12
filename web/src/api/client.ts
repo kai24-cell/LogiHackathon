@@ -11,6 +11,16 @@ export class ApiFailure extends Error {
 }
 
 const safeCodes = new Set([
+  "INVALID_TRANSCRIPT",
+  "IMPORT_TOO_LARGE",
+  "IMPORT_LIMIT",
+  "EXPORT_REQUIRES_REVIEW",
+  "STALE_IMPORT",
+  "HISTORY_TOO_LARGE",
+  "STALE_CONVERSATION",
+  "CONVERSATION_NOT_FOUND",
+  "CONVERSATION_WORKSPACE_MISMATCH",
+  "CONVERSATION_LIMIT",
   "DEMO_NOT_CONFIGURED",
   "INVALID_DEMO_CONFIG",
   "INVALID_DEMO_MODEL",
@@ -76,6 +86,7 @@ export async function api<T>(
   path: string,
   body?: unknown,
   method?: "PUT" | "DELETE",
+  format: "json" | "text" = "json",
 ): Promise<T> {
   if (!token && path !== "/health")
     throw new ApiFailure(0, "CONNECTION_REQUIRED");
@@ -112,7 +123,10 @@ export async function api<T>(
     throw new ApiFailure(response.status, code);
   }
   try {
-    return (await response.json()) as T;
+    if (response.status === 204) return undefined as T;
+    return (
+      format === "text" ? await response.text() : await response.json()
+    ) as T;
   } catch {
     throw new ApiFailure(response.status, "INVALID_RESPONSE");
   }

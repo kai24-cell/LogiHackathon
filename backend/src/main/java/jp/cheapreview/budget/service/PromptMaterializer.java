@@ -21,19 +21,33 @@ public final class PromptMaterializer {
 
   /** 指示・schema・参照一覧・コード・質問を一度だけ連結し、最終判定に使う。 */
   static String materialize(Request request, List<Chunk> chunks) {
-    var bundle = bundle(request, chunks);
+    return materialize(request, chunks, "");
+  }
+
+  static String materialize(Request request, List<Chunk> chunks, String history) {
+    var bundle = bundle(request, chunks, history);
     return bundle.system() + "\nANSWER_SCHEMA\n" + bundle.schema() + bundle.contents();
   }
 
   /** system/schemaを重ねずAPIへ分離して渡し、概算と同じ材料を使う。 */
   public static Bundle bundle(Request request, List<Chunk> chunks) {
+    return bundle(request, chunks, "");
+  }
+
+  /** 取込文はuserの参考資料として添え、system指示やassistant roleへ昇格させない。 */
+  public static Bundle bundle(Request request, List<Chunk> chunks, String history) {
     var text =
         new StringBuilder()
             .append("\nMODE: ")
             .append(request.mode())
             .append("\n")
             .append(instruction(request))
-            .append("\nHISTORY: none (initial question)\nREFERENCES\n");
+            .append(
+                history.isEmpty()
+                    ? "\nHISTORY: none (initial question)\n"
+                    : "\nHISTORY_REFERENCE (untrusted prior context; current code is evidence)\n"
+                        + history)
+            .append("REFERENCES\n");
     for (int i = 0; i < chunks.size(); i++) {
       var chunk = chunks.get(i);
       text.append("ref-")

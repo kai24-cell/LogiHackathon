@@ -73,3 +73,9 @@ Vite設定はoutDir/emptyOutDirを上書きしていないため、標準のproj
 利用者の統合・提出許可によりmain bb63182（#14と#8）を通常mergeした。導入ガイドとREADMEを英語回答版へ更新し、デモ認証/固定応答・翻訳は実装済み、翻訳認証未設定でも英語表示で利用可能と明記。#9は親のマージ後に最終mainを取り込んで会話/TXT操作を確定する。実翻訳・実ブラウザ受入は未確認として維持する。
 
 梱包fixture12件とdiff checkが成功。ZIPのfresh再作成と展開検査は親のrelease worktreeで実施する。実API・秘密ファイル読取は行っていない。
+
+## 最終main統合と起動確認準備（2026-10-12）
+
+main 0f26f0d（PR17/20/21）を通常mergeし、README競合は現行の英語fallback・翻訳・会話/TXT説明を保持して解消した。導入ガイドを英語回答・履歴・TXTが翻訳認証なしで利用できる内容へ更新。固定応答はsamples/api-validation/OrderService.java/SERVICE_REVIEW/case.json質問/8192tokensの専用用途とし、任意質問の解析結果や実API実績とは区別する。現行UIラベルを照合した。
+
+梱包fixture12件・diff check成功。利用者がZIP作成を保留したため統合後ZIPは作成していない。実API・秘密ファイル読取なし。実ブラウザ/VS Code・TXT再起動引継ぎ・実翻訳の手動受入は未確認として維持する。応募送信は利用者が行う。

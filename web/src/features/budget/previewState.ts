@@ -13,6 +13,8 @@ export function inputKey(input: PreviewInput): string {
     input.modelId,
     input.targetFileId,
     input.targetMethodId,
+    input.conversationId ?? null,
+    input.conversationVersion ?? 0,
   ]);
 }
 
