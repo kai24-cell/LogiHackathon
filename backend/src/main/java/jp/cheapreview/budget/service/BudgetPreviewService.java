@@ -38,6 +38,7 @@ public class BudgetPreviewService {
   private final JavaAnalysisService analysis;
   private final CodeSearchService search;
   private final Clock clock;
+  private final MmrSelector selector;
   private jp.cheapreview.conversation.service.ConversationService conversations;
 
   @Autowired
@@ -49,7 +50,6 @@ public class BudgetPreviewService {
   private final String configVersion = UUID.randomUUID().toString();
   private final Map<String, Result> previews = new LinkedHashMap<>();
 
-  @Autowired
   public BudgetPreviewService(
       BudgetSettings settings,
       TokenEstimator estimator,
@@ -58,20 +58,39 @@ public class BudgetPreviewService {
     this(settings, estimator, analysis, search, Clock.systemUTC());
   }
 
+  @Autowired
+  public BudgetPreviewService(
+      BudgetSettings settings,
+      TokenEstimator estimator,
+      JavaAnalysisService analysis,
+      CodeSearchService search,
+      MmrSettings mmr) {
+    this(settings, estimator, analysis, search, Clock.systemUTC(), mmr);
+  }
+
   BudgetPreviewService(
       BudgetSettings settings,
       TokenEstimator estimator,
       JavaAnalysisService analysis,
       CodeSearchService search,
       Clock clock) {
+    this(settings, estimator, analysis, search, clock, new MmrSettings(0.7));
+  }
+
+  public BudgetPreviewService(
+      BudgetSettings settings,
+      TokenEstimator estimator,
+      JavaAnalysisService analysis,
+      CodeSearchService search,
+      Clock clock,
+      MmrSettings mmr) {
     this.settings = settings;
     this.estimator = estimator;
     this.analysis = analysis;
     this.search = search;
     this.clock = clock;
+    this.selector = new MmrSelector(mmr);
   }
-
-  private record OptionalChunk(Chunk chunk, double score, double density) {}
 
   private record Selection(
       List<Chunk> chunks,
@@ -274,7 +293,13 @@ public class BudgetPreviewService {
                       && request.inputBudgetTokens() >= estimator.required(total);
                 });
     var candidates = optionalCandidates(capture, request, ranking, builder, files, fits, excluded);
-    addWithinBudget(request, selected, candidates, excluded, history.text());
+    var retainedMethods = new LinkedHashMap<String, List<String>>();
+    selected.forEach(chunk -> retainedMethods.put(chunk.fileId(), chunk.methodIds()));
+    candidates.forEach(
+        candidate ->
+            retainedMethods.put(candidate.chunk().fileId(), candidate.chunk().methodIds()));
+    var similarity = search.selectionSimilarity(request.workspaceId(), capture, retainedMethods);
+    addWithinBudget(request, selected, candidates, excluded, history.text(), similarity);
     return new Selection(
         List.copyOf(selected),
         List.copyOf(excluded),
@@ -284,8 +309,8 @@ public class BudgetPreviewService {
         history);
   }
 
-  /** 重複・設定本文・関連度0を除外し、追加候補をdensity順へ固定する。 */
-  private List<OptionalChunk> optionalCandidates(
+  /** 重複・設定本文・関連度0を除外し、保持メソッドと安全性を確定する。 */
+  private List<MmrSelector.Candidate> optionalCandidates(
       WorkspaceCapture capture,
       Request request,
       CodeSearch.Result ranking,
@@ -293,7 +318,7 @@ public class BudgetPreviewService {
       Map<String, JavaAnalysis.File> files,
       boolean fits,
       List<Excluded> excluded) {
-    List<OptionalChunk> candidates = new ArrayList<>();
+    List<MmrSelector.Candidate> candidates = new ArrayList<>();
     Set<String> seen = new java.util.HashSet<>(request.selectedFileIds());
     for (var candidate : ranking.candidates()) {
       if (!seen.add(candidate.fileId())) continue;
@@ -327,18 +352,9 @@ public class BudgetPreviewService {
                   "秘密情報の疑いがあり任意候補を除外。自動検出は完全ではありません。"));
           continue;
         }
-        // density=R/max(T_chunk,1)。Rは0〜1、T_chunkは暫定tokens。0除算を防ぎ順序を固定する。
-        // 見込み量は候補順にだけ使用し、採用判定は参照・指示を含む完全promptで行う。
-        double density =
-            candidate.score().total() / Math.max(estimator.estimate(chunk.code()).tokens(), 1);
-        candidates.add(new OptionalChunk(chunk, candidate.score().total(), density));
+        candidates.add(new MmrSelector.Candidate(chunk, candidate.score().total()));
       }
     }
-    candidates.sort(
-        Comparator.comparingDouble(OptionalChunk::density)
-            .reversed()
-            .thenComparing(Comparator.comparingDouble(OptionalChunk::score).reversed())
-            .thenComparing(candidate -> candidate.chunk().relativePath()));
     return candidates;
   }
 
@@ -346,22 +362,43 @@ public class BudgetPreviewService {
   private void addWithinBudget(
       Request request,
       List<Chunk> selected,
-      List<OptionalChunk> candidates,
+      List<MmrSelector.Candidate> candidates,
       List<Excluded> excluded,
-      String history) {
-    for (var candidate : candidates) {
-      var trial = new ArrayList<>(selected);
-      trial.add(candidate.chunk());
-      long tokens =
-          estimator.estimate(PromptMaterializer.materialize(request, trial, history)).tokens();
-      if (request.inputBudgetTokens() >= estimator.required(tokens))
-        selected.add(candidate.chunk());
-      else
-        excluded.add(
-            new Excluded(
-                candidate.chunk().fileId(),
-                candidate.chunk().relativePath(),
-                "候補と安全余裕が予算に収まらないため除外。後続の小さい候補の確認は継続"));
+      String history,
+      jp.cheapreview.search.service.CodeSimilarity similarity) {
+    // 必須チャンクはSの初期集合であり、MMRによって解除・分割しない。
+    var result =
+        selector.select(
+            selected,
+            candidates,
+            similarity::similarity,
+            chunks ->
+                estimator
+                    .estimate(PromptMaterializer.materialize(request, chunks, history))
+                    .tokens(),
+            estimator,
+            request.inputBudgetTokens());
+    for (var decision : result.accepted()) {
+      var chunk = decision.candidate().chunk();
+      var reasons = new ArrayList<>(chunk.reasons());
+      reasons.set(0, selector.reason(decision));
+      selected.add(
+          new Chunk(
+              chunk.fileId(),
+              chunk.relativePath(),
+              chunk.mandatory(),
+              chunk.methodIds(),
+              chunk.ranges(),
+              chunk.omittedRanges(),
+              chunk.code(),
+              List.copyOf(reasons)));
+    }
+    for (var candidate : result.rejected()) {
+      excluded.add(
+          new Excluded(
+              candidate.chunk().fileId(),
+              candidate.chunk().relativePath(),
+              "候補と安全余裕が予算に収まらないため除外。後続の小さい候補の確認は継続"));
     }
   }
 
