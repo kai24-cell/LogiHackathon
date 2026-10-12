@@ -86,6 +86,12 @@ public class CodeSearchService {
     return Map.copyOf(similarities);
   }
 
+  /** 送信予定の保持メソッドを同じsnapshotの索引から集約する。ディスクは再読込しない。 */
+  public synchronized CodeSimilarity selectionSimilarity(
+      String workspaceId, WorkspaceCapture capture, Map<String, List<String>> retainedMethods) {
+    return new CodeSimilarity(index(workspaceId, capture), retainedMethods);
+  }
+
   /** 並べ替え済みの候補へ1始まりの順位を付け、主選択と内訳をそのまま保持する。 */
   private List<Candidate> assignRanks(List<Candidate> candidates) {
     List<Candidate> ranked = new ArrayList<>();
