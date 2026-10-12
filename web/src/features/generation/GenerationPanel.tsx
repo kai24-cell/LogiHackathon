@@ -69,6 +69,22 @@ export function conversationRefreshKey(job: GenerationJob): string {
     : "";
 }
 
+export function TranslationSettingsStatus({
+  ready,
+}: {
+  ready: boolean | undefined;
+}) {
+  return (
+    <p>
+      {ready === true
+        ? "翻訳認証設定あり（有効性・疎通は未確認）"
+        : ready === false
+          ? "現在は英語回答。日本語翻訳は未設定。会話履歴とTXT保存は英語回答でも利用できます。"
+          : "翻訳設定の状態は未確認です。"}
+    </p>
+  );
+}
+
 /** 外部のエラー本文を表示せず、定型コードから次の操作を示す。 */
 export function translationError(code: string): string {
   const messages: Record<string, string> = {
@@ -379,13 +395,7 @@ export function GenerationPanel({
       <p>
         実APIモードでは生成・翻訳に料金が発生する可能性があります。翻訳できない部分は英語原文を表示します。固定応答モードは外部APIを呼びません。
       </p>
-      <p>
-        {translationReady === true
-          ? "翻訳認証設定あり（有効性・疎通は未確認）"
-          : translationReady === false
-            ? "翻訳未設定：バックエンドのGCP認証とprojectを設定してください。英語回答は保持されます。"
-            : "翻訳設定の状態は未確認です。"}
-      </p>
+      <TranslationSettingsStatus ready={translationReady} />
       <p>
         previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
       </p>

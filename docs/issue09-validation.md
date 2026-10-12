@@ -85,3 +85,13 @@ stub3ケース（normal/invalid/timeout）は全件成功。normalは翻訳認�
 統合専用reviewerは`.codex/agents/reviewer.toml`に従って差分・関連コード・設計・追加テストをreadonly確認し、修正が必要な確実な不具合はなかった。英語1回commit、翻訳失敗/中止注記、再翻訳表示更新、version失効、一方向event、未知/期限切れ/clear通知無視、翻訳中のTXT取得を確認した。レビュー中の対象コード編集はしていない。
 
 最新CI結果はPRへ記録する。実API・認証ファイル読取・実ブラウザ操作は行っていない。
+
+## main同期と英語提出範囲（2026-10-12）
+
+Issue #14・#8のSquash merge後のmain `bb63182`を通常mergeし、会話・TXT機能と翻訳未設定時の「現在は英語回答。日本語翻訳は未設定」表示を保持した。READMEの古い未実装表記を整理し、英語提出では翻訳だけ未実行で、予算・schema・参照・usage検証は省略しないことを明記した。
+
+- Java 189件、Spotless、verify、jarビルド成功。翻訳未設定でも英語履歴1往復・TXT保存・次回preview履歴が成立し、翻訳APIを呼ばない回帰テストを追加した。
+- Web 41件、整形チェック、Lint、型チェック、ビルド成功。実際の設定状態表示コンポーネントのmarkupで英語表示とTXT利用案内を確認した。
+- 専用reviewerによるmain同期5ファイルのreadonly再レビューで追加指摘なし。既存Surefire189件とdiff checkも確認した。
+
+実ブラウザの保存・再接続と実API受入は未確認。今回の追加実API通信は0回。最新コミットのCI結果はPRに記録する。

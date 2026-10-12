@@ -866,4 +866,28 @@ class GenerationIntegrationTest {
     completed(started.jobId());
     verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
   }
+
+  @Test
+  void unconfiguredTranslationStillSupportsEnglishConversationAndTxtWithoutTranslatorCalls()
+      throws Exception {
+    when(translator.configured()).thenReturn(false);
+    var view = conversations.create(workspace);
+    var done =
+        completed(generation.start(request(conversationInput(view.conversationId(), 0))).jobId());
+    assertEquals(GenerationDtos.State.TRANSLATION_FAILED, done.state());
+    assertEquals("TRANSLATION_NOT_READY", done.translation().errorCode());
+    assertEquals(done.result().answerEnglish(), done.translation().displayAnswer());
+    var committed = conversations.get(view.conversationId());
+    assertEquals(1, committed.turns().size());
+    String exported = conversations.export(view.conversationId());
+    assertTrue(exported.contains("Explanation"));
+    assertTrue(exported.contains("未翻訳"));
+    var input = conversationInput(view.conversationId(), committed.version());
+    var preview = budgets.preview(workspaces.getCapture(workspace, snapshot), input);
+    assertTrue(preview.promptMaterial().contains("ASSISTANT_ENGLISH_JSON"));
+    assertEquals(1, preview.historyTurnsIncluded());
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+    verify(translator, org.mockito.Mockito.never()).translate(any());
+    verify(translator, org.mockito.Mockito.never()).translate(any(), any());
+  }
 }

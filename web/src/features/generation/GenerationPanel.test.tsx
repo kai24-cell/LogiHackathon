@@ -7,6 +7,7 @@ import {
   sourceLabel,
   generationDiagnostics,
   conversationRefreshKey,
+  TranslationSettingsStatus,
   translationError,
 } from "./GenerationPanel";
 import { canGenerate, type GenerationJob } from "../../types/generation";
@@ -244,4 +245,13 @@ it("refreshes committed history during translation and again when display change
   expect(conversationRefreshKey(retrying)).not.toBe(
     conversationRefreshKey(failed),
   );
+});
+
+it("shows the English submission wording when Japanese translation is not configured", () => {
+  const html = renderToStaticMarkup(
+    <TranslationSettingsStatus ready={false} />,
+  );
+  expect(html).toContain("現在は英語回答。日本語翻訳は未設定。");
+  expect(html).toContain("会話履歴とTXT保存は英語回答でも利用できます。");
+  expect(html).not.toContain("翻訳認証設定あり");
 });
