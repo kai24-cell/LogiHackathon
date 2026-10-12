@@ -11,6 +11,8 @@ export interface BudgetRequest {
   targetFileId: string | null;
   targetMethodId: string | null;
   revision: number;
+  conversationId?: string;
+  conversationVersion?: number;
 }
 
 export interface CodeRange {
@@ -40,6 +42,8 @@ export interface BudgetResult {
   relatedAdditionalTokens: number;
   historyTokens: number;
   historyTurnsIncluded: number;
+  historyTurnsOmitted?: number;
+  conversationVersion?: number;
   marginTokens: number;
   minimumBudgetTokens: number;
   mandatoryMinimumBudgetTokens: number;

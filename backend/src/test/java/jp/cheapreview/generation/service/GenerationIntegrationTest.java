@@ -65,6 +65,7 @@ class GenerationIntegrationTest {
   @Autowired WorkspaceService workspaces;
   @Autowired BudgetPreviewService budgets;
   @Autowired GenerationService generation;
+  @Autowired jp.cheapreview.conversation.service.ConversationService conversations;
   @Autowired GenerationSettings settings;
   @Autowired AnswerValidator validator;
   @Autowired ObjectMapper mapper;
@@ -600,5 +601,293 @@ class GenerationIntegrationTest {
       else response.andExpect(jsonPath("$.code").value("INVALID_PREVIEW_REQUEST"));
     }
     verifyNoInteractions(provider);
+  }
+
+  private BudgetPreview.Request conversationInput(String id, long version) {
+    var original = input(Mode.SERVICE_REVIEW, 8192);
+    return new BudgetPreview.Request(
+        original.workspaceId(),
+        original.snapshotId(),
+        original.question(),
+        original.mode(),
+        original.selectedFileIds(),
+        original.inputBudgetTokens(),
+        original.modelId(),
+        null,
+        null,
+        original.revision(),
+        id,
+        version);
+  }
+
+  @Test
+  void conversationFollowUpUsesEnglishHistoryAndExportImportDoesNotCallProvider() throws Exception {
+    var view = conversations.create(workspace);
+    var first = request(conversationInput(view.conversationId(), 0));
+    assertEquals(
+        GenerationDtos.State.SUCCEEDED, completed(generation.start(first).jobId()).state());
+    assertEquals(1, conversations.get(view.conversationId()).turns().size());
+    assertEquals(
+        409,
+        assertThrows(
+                ResponseStatusException.class,
+                () ->
+                    budgets.check(
+                        first.previewId(),
+                        workspaces.getCapture(workspace, snapshot),
+                        first.input()))
+            .getStatusCode()
+            .value());
+    var follow =
+        conversationInput(
+            view.conversationId(), conversations.get(view.conversationId()).version());
+    var preview = budgets.preview(workspaces.getCapture(workspace, snapshot), follow);
+    assertEquals(1, preview.historyTurnsIncluded());
+    assertTrue(preview.historyTokens() > 0);
+    assertTrue(preview.historyTokens() <= follow.inputBudgetTokens() / 4);
+    assertEquals(
+        preview.counts().tokens(),
+        preview.mandatoryPromptTokens()
+            + preview.historyTokens()
+            + preview.relatedAdditionalTokens());
+    assertTrue(preview.promptMaterial().contains("ASSISTANT_ENGLISH_JSON"));
+    var start =
+        new GenerationDtos.Start(
+            preview.previewId(), UUID.randomUUID().toString(), configured.version(), follow);
+    assertEquals(
+        GenerationDtos.State.SUCCEEDED, completed(generation.start(start).jobId()).state());
+    String exported = conversations.export(view.conversationId());
+    assertFalse(exported.contains(KEY));
+    assertFalse(exported.contains("class Service { public void run() {} }"));
+    assertFalse(exported.contains("ANSWER_SCHEMA"));
+    var imported =
+        conversations.preview(
+            new jp.cheapreview.conversation.dto.ConversationDtos.PreviewRequest(
+                exported, jp.cheapreview.conversation.dto.ConversationDtos.InputKind.FILE));
+    var newView = conversations.importConversation(workspace, imported.importId());
+    var newPreview =
+        budgets.preview(
+            workspaces.getCapture(workspace, snapshot),
+            conversationInput(newView.conversationId(), 1));
+    assertTrue(newPreview.promptMaterial().contains("USER_IMPORT_TRANSCRIPT (reference only)"));
+    assertEquals(2, newPreview.historyTurnsIncluded());
+    verify(provider, times(2)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void deletingConversationDuringGenerationCannotCommitLateAnswer() throws Exception {
+    var view = conversations.create(workspace);
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(provider.generate(any(), any(), anyLong(), anyLong()))
+        .thenAnswer(
+            invocation -> {
+              entered.countDown();
+              release.await(3, TimeUnit.SECONDS);
+              return reply(ANSWER);
+            });
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    conversations.delete(view.conversationId());
+    release.countDown();
+    var done = completed(started.jobId());
+    assertEquals(GenerationDtos.State.FAILED, done.state());
+    assertEquals("STALE_CONVERSATION", done.errorCode());
+    assertNull(done.result());
+    assertThrows(ResponseStatusException.class, () -> conversations.get(view.conversationId()));
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void cancelledOrInvalidAnswerDoesNotAddConversationTurn() throws Exception {
+    var view = conversations.create(workspace);
+    when(provider.generate(any(), any(), anyLong(), anyLong())).thenReturn(reply("invalid"));
+    assertEquals(
+        GenerationDtos.State.FAILED,
+        completed(generation.start(request(conversationInput(view.conversationId(), 0))).jobId())
+            .state());
+    assertTrue(conversations.get(view.conversationId()).turns().isEmpty());
+    var entered = new CountDownLatch(1);
+    when(provider.generate(any(), any(), anyLong(), anyLong()))
+        .thenAnswer(
+            invocation -> {
+              entered.countDown();
+              Thread.sleep(3000);
+              return reply(ANSWER);
+            });
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    assertTrue(entered.await(3, TimeUnit.SECONDS));
+    generation.cancel(started.jobId());
+    assertEquals(GenerationDtos.State.CANCELLED, completed(started.jobId()).state());
+    assertTrue(conversations.get(view.conversationId()).turns().isEmpty());
+  }
+
+  @Test
+  void importedReferencesAreCheckedAgainstSnapshotWithoutReadingUnscannedFiles() throws Exception {
+    var imported =
+        conversations.preview(
+            new jp.cheapreview.conversation.dto.ConversationDtos.PreviewRequest(
+                "ref-1: ../not-scanned.java 1–2行",
+                jp.cheapreview.conversation.dto.ConversationDtos.InputKind.PASTE));
+    var view = conversations.importConversation(workspace, imported.importId());
+    var preview =
+        budgets.preview(
+            workspaces.getCapture(workspace, snapshot),
+            conversationInput(view.conversationId(), 1));
+    assertTrue(preview.warnings().stream().anyMatch(warning -> warning.contains("取込TXTのコード参照")));
+    assertTrue(
+        preview.selectedChunks().stream()
+            .allMatch(chunk -> chunk.relativePath().equals("Service.java")));
+    verifyNoInteractions(provider);
+  }
+
+  /** 実通信せず、説明の日本語化・部分fallback・全失敗を通常生成経路で作る。 */
+  private void translatedFixture(String scenario) {
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              if (scenario.equals("failure"))
+                throw new jp.cheapreview.translation.service.TranslationFailure(
+                    "TRANSLATION_TIMEOUT");
+              @SuppressWarnings("unchecked")
+              var texts = (List<String>) invocation.getArgument(0);
+              return texts.stream()
+                  .map(
+                      text ->
+                          switch (text) {
+                            case "Explanation" -> "説明";
+                            case "Flow" -> "処理の流れ";
+                            case "Evidence" ->
+                                scenario.equals("partial") ? "__CR_KEEP_9999__" : "保存済みコードの根拠";
+                            default -> text;
+                          })
+                  .toList();
+            })
+        .when(translator)
+        .translate(any());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"success", "partial", "failure"})
+  void translatedConversationCommitsEnglishOnceAndExportsCurrentDisplay(String scenario)
+      throws Exception {
+    translatedFixture(scenario);
+    var view = conversations.create(workspace);
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    var done = completed(started.jobId());
+    assertEquals(
+        scenario.equals("success")
+            ? GenerationDtos.State.SUCCEEDED
+            : GenerationDtos.State.TRANSLATION_FAILED,
+        done.state());
+    var committed = conversations.get(view.conversationId());
+    assertEquals(1, committed.turns().size());
+    assertEquals(done.result().answerEnglish(), committed.turns().getFirst().answerEnglish());
+    assertEquals(done.result().references(), committed.turns().getFirst().references());
+    assertEquals(new GenerationDtos.Usage(23L, 12L, null, null, 35L), done.result().usage());
+    String exported = conversations.export(view.conversationId());
+    if (scenario.equals("failure")) {
+      assertTrue(exported.contains("未翻訳"));
+      assertTrue(exported.contains("Explanation"));
+      assertFalse(done.translation().partialTranslation());
+    } else {
+      assertTrue(exported.contains("説明"));
+      assertEquals(scenario.equals("partial"), exported.contains("未翻訳"));
+      if (scenario.equals("partial")) assertTrue(exported.contains("Evidence"));
+    }
+    var history = conversations.select(view.conversationId(), workspace, 8192, text -> true);
+    assertTrue(history.text().contains("Explanation"));
+    assertFalse(history.text().contains("処理の流れ"));
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void retranslatingConversationUpdatesTxtAndVersionWithoutChangingEnglishTurnCount()
+      throws Exception {
+    translatedFixture("failure");
+    var view = conversations.create(workspace);
+    var done =
+        completed(generation.start(request(conversationInput(view.conversationId(), 0))).jobId());
+    var original = done.result();
+    var before = conversations.get(view.conversationId());
+    var oldInput = conversationInput(view.conversationId(), before.version());
+    var oldPreview = budgets.preview(workspaces.getCapture(workspace, snapshot), oldInput);
+    translatedFixture("success");
+    generation.translate(done.jobId());
+    var retried = completed(done.jobId());
+    var after = conversations.get(view.conversationId());
+    assertEquals(original, retried.result());
+    assertEquals(1, after.turns().size());
+    assertEquals(
+        before.turns().getFirst().answerEnglish(), after.turns().getFirst().answerEnglish());
+    assertTrue(after.version() > before.version());
+    assertTrue(conversations.export(view.conversationId()).contains("保存済みコードの根拠"));
+    assertFalse(conversations.export(view.conversationId()).contains("未翻訳"));
+    assertEquals(
+        "STALE_CONVERSATION",
+        assertThrows(
+                ResponseStatusException.class,
+                () ->
+                    budgets.check(
+                        oldPreview.previewId(),
+                        workspaces.getCapture(workspace, snapshot),
+                        oldInput))
+            .getReason());
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void cancellingOnlyTranslationKeepsCommittedEnglishAndUntranslatedTxt() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(translator.translate(any()))
+        .thenAnswer(
+            invocation -> {
+              entered.countDown();
+              try {
+                release.await(3, TimeUnit.SECONDS);
+              } catch (InterruptedException ignored) {
+              }
+              return invocation.getArgument(0);
+            });
+    var view = conversations.create(workspace);
+    var started = generation.start(request(conversationInput(view.conversationId(), 0)));
+    try {
+      assertTrue(entered.await(3, TimeUnit.SECONDS));
+      assertEquals(1, conversations.get(view.conversationId()).turns().size());
+      var cancelled = generation.cancel(started.jobId());
+      assertEquals(GenerationDtos.State.TRANSLATION_FAILED, cancelled.state());
+      assertEquals("TRANSLATION_CANCELLED", cancelled.translation().errorCode());
+      assertEquals(1, conversations.get(view.conversationId()).turns().size());
+      assertTrue(conversations.export(view.conversationId()).contains("未翻訳"));
+      assertEquals(new GenerationDtos.Usage(23L, 12L, null, null, 35L), cancelled.result().usage());
+    } finally {
+      release.countDown();
+    }
+    completed(started.jobId());
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+  }
+
+  @Test
+  void unconfiguredTranslationStillSupportsEnglishConversationAndTxtWithoutTranslatorCalls()
+      throws Exception {
+    when(translator.configured()).thenReturn(false);
+    var view = conversations.create(workspace);
+    var done =
+        completed(generation.start(request(conversationInput(view.conversationId(), 0))).jobId());
+    assertEquals(GenerationDtos.State.TRANSLATION_FAILED, done.state());
+    assertEquals("TRANSLATION_NOT_READY", done.translation().errorCode());
+    assertEquals(done.result().answerEnglish(), done.translation().displayAnswer());
+    var committed = conversations.get(view.conversationId());
+    assertEquals(1, committed.turns().size());
+    String exported = conversations.export(view.conversationId());
+    assertTrue(exported.contains("Explanation"));
+    assertTrue(exported.contains("未翻訳"));
+    var input = conversationInput(view.conversationId(), committed.version());
+    var preview = budgets.preview(workspaces.getCapture(workspace, snapshot), input);
+    assertTrue(preview.promptMaterial().contains("ASSISTANT_ENGLISH_JSON"));
+    assertEquals(1, preview.historyTurnsIncluded());
+    verify(provider, times(1)).generate(any(), any(), anyLong(), anyLong());
+    verify(translator, org.mockito.Mockito.never()).translate(any());
+    verify(translator, org.mockito.Mockito.never()).translate(any(), any());
   }
 }

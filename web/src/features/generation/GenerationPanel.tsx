@@ -62,6 +62,29 @@ export function sourceLabel(source: string | undefined): string {
   return "ユーザー認証による実API（料金が発生する可能性があります）";
 }
 
+/** 英語確定と翻訳表示更新を区別し、翻訳中でも確定済みTXTを取得できるようにする。 */
+export function conversationRefreshKey(job: GenerationJob): string {
+  return job.result
+    ? `${job.jobId}:${job.state}:${job.translation?.attempt ?? 0}:${job.translation?.status ?? "none"}`
+    : "";
+}
+
+export function TranslationSettingsStatus({
+  ready,
+}: {
+  ready: boolean | undefined;
+}) {
+  return (
+    <p>
+      {ready === true
+        ? "翻訳認証設定あり（有効性・疎通は未確認）"
+        : ready === false
+          ? "現在は英語回答。日本語翻訳は未設定。会話履歴とTXT保存は英語回答でも利用できます。"
+          : "翻訳設定の状態は未確認です。"}
+    </p>
+  );
+}
+
 /** 外部のエラー本文を表示せず、定型コードから次の操作を示す。 */
 export function translationError(code: string): string {
   const messages: Record<string, string> = {
@@ -145,11 +168,13 @@ export function GenerationPanel({
   preview,
   busy,
   onModelConfigured,
+  onCompleted,
 }: {
   input: PreviewInput;
   preview?: BudgetResult;
   busy: boolean;
   onModelConfigured?: (modelId: string) => void;
+  onCompleted?: () => void;
 }) {
   const [settings, setSettings] = useState<GenerationSettings>();
   const [key, setKey] = useState("");
@@ -164,6 +189,7 @@ export function GenerationPanel({
     undefined,
   );
   const sendingRef = useRef(false);
+  const conversationNotification = useRef("");
   const settingsRequestVersion = useRef(0);
   const current = useRef({ input, preview, settings });
   current.current = { input, preview, settings };
@@ -220,6 +246,11 @@ export function GenerationPanel({
         const value = await api<GenerationJob>(`/jobs/${jobId}`);
         if (cancelled) return;
         setJob(value);
+        const notification = conversationRefreshKey(value);
+        if (notification && notification !== conversationNotification.current) {
+          conversationNotification.current = notification;
+          onCompleted?.();
+        }
         if (
           value.state !== "QUEUED" &&
           value.state !== "GENERATING" &&
@@ -364,13 +395,7 @@ export function GenerationPanel({
       <p>
         実APIモードでは生成・翻訳に料金が発生する可能性があります。翻訳できない部分は英語原文を表示します。固定応答モードは外部APIを呼びません。
       </p>
-      <p>
-        {translationReady === true
-          ? "翻訳認証設定あり（有効性・疎通は未確認）"
-          : translationReady === false
-            ? "現在は英語回答。日本語翻訳は未設定。会話履歴とTXT保存は英語回答でも利用できます。"
-            : "翻訳設定の状態は未確認です。"}
-      </p>
+      <TranslationSettingsStatus ready={translationReady} />
       <p>
         previewのマスク・除外理由と送信全文を確認してください。秘密情報の完全な自動検出は保証しません。
       </p>

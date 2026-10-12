@@ -19,7 +19,40 @@ public final class BudgetPreview {
       String modelId,
       String targetFileId,
       String targetMethodId,
-      long revision) {}
+      long revision,
+      String conversationId,
+      long conversationVersion) {
+    public Request(
+        String workspaceId,
+        String snapshotId,
+        String question,
+        Mode mode,
+        List<String> selectedFileIds,
+        long inputBudgetTokens,
+        String modelId,
+        String targetFileId,
+        String targetMethodId,
+        long revision) {
+      this(
+          workspaceId,
+          snapshotId,
+          question,
+          mode,
+          selectedFileIds,
+          inputBudgetTokens,
+          modelId,
+          targetFileId,
+          targetMethodId,
+          revision,
+          null,
+          0);
+    }
+
+    @Override
+    public String toString() {
+      return "BudgetRequest[REDACTED]";
+    }
+  }
 
   public record Range(int beginLine, int endLine) {}
 
@@ -76,5 +109,9 @@ public final class BudgetPreview {
       List<String> warnings,
       Cost estimatedCost,
       String promptMaterial,
-      Formula formula) {}
+      Formula formula,
+      int historyTurnsOmitted,
+      long conversationVersion,
+      @com.fasterxml.jackson.annotation.JsonIgnore
+          jp.cheapreview.conversation.dto.ConversationDtos.History history) {}
 }

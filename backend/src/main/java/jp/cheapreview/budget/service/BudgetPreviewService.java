@@ -38,6 +38,14 @@ public class BudgetPreviewService {
   private final JavaAnalysisService analysis;
   private final CodeSearchService search;
   private final Clock clock;
+  private jp.cheapreview.conversation.service.ConversationService conversations;
+
+  @Autowired
+  public void setConversations(
+      jp.cheapreview.conversation.service.ConversationService conversations) {
+    this.conversations = conversations;
+  }
+
   private final String configVersion = UUID.randomUUID().toString();
   private final Map<String, Result> previews = new LinkedHashMap<>();
 
@@ -70,7 +78,8 @@ public class BudgetPreviewService {
       List<Excluded> excluded,
       List<String> warnings,
       long mandatoryTokens,
-      boolean usable) {}
+      boolean usable,
+      jp.cheapreview.conversation.dto.ConversationDtos.History history) {}
 
   /** 必須分を保持したまま予算判定し、候補追加のたびに完全promptと安全余裕を再計算する。 */
   public synchronized Result preview(WorkspaceCapture capture, Request request) {
@@ -81,20 +90,52 @@ public class BudgetPreviewService {
         search.search(
             request.workspaceId(),
             capture,
-            new CodeSearch.Request(request.question(), request.selectedFileIds(), request.mode()));
+            new CodeSearch.Request(
+                request.question(), searchSeeds(request, capture), request.mode()));
     var chunks =
         new SourceChunks(
             parsed, search.methodSimilarities(request.workspaceId(), capture, request.question()));
     var selection = select(capture, request, parsed, ranking, chunks);
-    String prompt = PromptMaterializer.materialize(request, selection.chunks());
+    String prompt =
+        PromptMaterializer.materialize(request, selection.chunks(), selection.history().text());
     var counts = estimator.estimate(prompt);
+    // 履歴の寄与は「必須分＋履歴」から必須分を引き、丸めと見出しも一度だけ計数する。
+    var mandatory = selection.chunks().stream().filter(Chunk::mandatory).toList();
+    long withHistory =
+        estimator
+            .estimate(
+                PromptMaterializer.materialize(request, mandatory, selection.history().text()))
+            .tokens();
+    long historyTokens = withHistory - selection.mandatoryTokens();
     long required = estimator.required(counts.tokens());
     var warnings = new ArrayList<>(selection.warnings());
+    if (conversations != null && request.conversationId() != null) {
+      var view = conversations.get(request.conversationId());
+      var paths =
+          capture.snapshot().files().stream()
+              .map(file -> file.relativePath())
+              .collect(Collectors.toSet());
+      if (jp.cheapreview.conversation.service.ConversationText.referencePaths(view.imported())
+          .stream()
+          .anyMatch(path -> !paths.contains(path)))
+        warnings.add(
+            "取込TXTのコード参照の一部が現在のsnapshotにありません。過去の参考情報として扱い、今回の選択コードを根拠にします。未走査パスは読み込みません。");
+      if (!view.turns().isEmpty()) {
+        if (view.turns().getLast().references().stream()
+            .anyMatch(ref -> !paths.contains(ref.relativePath())))
+          warnings.add("前回回答の参照先の一部が現在のsnapshotにありません。旧コードを読み直さず今回の主選択を根拠にします。");
+      }
+    }
     var price = settings.prices().get(request.modelId());
     if (price == null) warnings.add("モデル料金は未設定のため不明です。無料ではありません。context上限も保証しません。");
     else if (price.contextLimit() == null) warnings.add("モデルのcontext上限は未設定であり保証しません。");
     warnings.add("tokens・料金は暫定推定です。実測値・課金額の保証ではありません。思考・cache・翻訳料金は含めていません。");
-    warnings.add("今回は初回質問のみ。履歴は0件です。会話機能追加時は同じ送信材料へ履歴を一度だけ追加して再計数します。");
+    warnings.add(
+        "履歴採用 "
+            + selection.history().included()
+            + "往復、省略 "
+            + selection.history().omitted()
+            + "往復。取込文は過去の参考資料です。");
     boolean canExecute = selection.usable() && request.inputBudgetTokens() >= required;
     if (!canExecute) warnings.add("必須分と安全余裕が収まりません。主選択を減らすか入力予算を増やしてください。自動削除・切断はしません。");
 
@@ -108,9 +149,9 @@ public class BudgetPreviewService {
             clock.instant().plus(LIFETIME),
             counts,
             selection.mandatoryTokens(),
-            counts.tokens() - selection.mandatoryTokens(),
-            0,
-            0,
+            counts.tokens() - withHistory,
+            historyTokens,
+            selection.history().included(),
             estimator.margin(counts.tokens()),
             required,
             estimator.required(selection.mandatoryTokens()),
@@ -127,7 +168,10 @@ public class BudgetPreviewService {
                 settings.otherWeight(),
                 settings.marginRate(),
                 settings.minMargin(),
-                "design-v02-provisional-1"));
+                "design-v02-provisional-1"),
+            selection.history().omitted(),
+            selection.history().version(),
+            selection.history());
     remember(result);
     return result;
   }
@@ -149,6 +193,27 @@ public class BudgetPreviewService {
             < estimator.required(estimator.estimate(result.promptMaterial()).tokens()))
       throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "BUDGET_TOO_SMALL");
     return result;
+  }
+
+  /** 前回参照は現在の相対パスへ解決できるものだけ探索の起点へ足し、主選択へ昇格させない。 */
+  private List<String> searchSeeds(Request request, WorkspaceCapture capture) {
+    if (conversations == null
+        || request.conversationId() == null
+        || request.conversationId().isBlank()) return request.selectedFileIds();
+    var view = conversations.get(request.conversationId());
+    if (view.turns().isEmpty()) return request.selectedFileIds();
+    var previousPaths =
+        view.turns().getLast().references().stream()
+            .map(ref -> ref.relativePath())
+            .collect(Collectors.toSet());
+    var prior =
+        capture.snapshot().files().stream()
+            .filter(file -> previousPaths.contains(file.relativePath()))
+            .map(file -> file.fileId());
+    return java.util.stream.Stream.concat(request.selectedFileIds().stream(), prior)
+        .distinct()
+        .limit(100)
+        .toList();
   }
 
   /** 主選択と任意候補を分離し、候補重複・ゼロ関連度・安全性を判定して選定理由を残す。 */
@@ -191,14 +256,32 @@ public class BudgetPreviewService {
     long mandatoryTokens =
         estimator.estimate(PromptMaterializer.materialize(request, selected)).tokens();
     boolean fits = usable && request.inputBudgetTokens() >= estimator.required(mandatoryTokens);
+    final List<Chunk> mandatory = List.copyOf(selected);
+    var history =
+        conversations == null
+            ? jp.cheapreview.conversation.dto.ConversationDtos.History.empty()
+            : conversations.select(
+                request.conversationId(),
+                request.workspaceId(),
+                request.inputBudgetTokens(),
+                text -> {
+                  long total =
+                      estimator
+                          .estimate(PromptMaterializer.materialize(request, mandatory, text))
+                          .tokens();
+                  // 履歴ラベルの差分も25%枠に含める。主選択は固定し、任意候補より先に確定する。
+                  return total - mandatoryTokens <= request.inputBudgetTokens() / 4
+                      && request.inputBudgetTokens() >= estimator.required(total);
+                });
     var candidates = optionalCandidates(capture, request, ranking, builder, files, fits, excluded);
-    addWithinBudget(request, selected, candidates, excluded);
+    addWithinBudget(request, selected, candidates, excluded, history.text());
     return new Selection(
         List.copyOf(selected),
         List.copyOf(excluded),
         List.copyOf(warnings),
         mandatoryTokens,
-        usable);
+        usable,
+        history);
   }
 
   /** 重複・設定本文・関連度0を除外し、追加候補をdensity順へ固定する。 */
@@ -264,11 +347,13 @@ public class BudgetPreviewService {
       Request request,
       List<Chunk> selected,
       List<OptionalChunk> candidates,
-      List<Excluded> excluded) {
+      List<Excluded> excluded,
+      String history) {
     for (var candidate : candidates) {
       var trial = new ArrayList<>(selected);
       trial.add(candidate.chunk());
-      long tokens = estimator.estimate(PromptMaterializer.materialize(request, trial)).tokens();
+      long tokens =
+          estimator.estimate(PromptMaterializer.materialize(request, trial, history)).tokens();
       if (request.inputBudgetTokens() >= estimator.required(tokens))
         selected.add(candidate.chunk());
       else
@@ -301,6 +386,8 @@ public class BudgetPreviewService {
         || request.modelId().isBlank()
         || request.modelId().length() > 200
         || request.revision() < 0) bad("INVALID_PREVIEW_REQUEST");
+    if (conversations != null)
+      conversations.checkVersion(request.conversationId(), request.conversationVersion());
     Set<String> selected = Set.copyOf(request.selectedFileIds());
     if (!capture.snapshot().files().stream()
         .map(file -> file.fileId())
@@ -354,7 +441,9 @@ public class BudgetPreviewService {
                 request.modelId(),
                 request.targetFileId() == null ? "" : request.targetFileId(),
                 request.targetMethodId() == null ? "" : request.targetMethodId(),
-                Long.toString(request.revision())));
+                Long.toString(request.revision()),
+                request.conversationId() == null ? "" : request.conversationId(),
+                Long.toString(request.conversationVersion())));
     parts.addAll(request.selectedFileIds().stream().distinct().sorted().toList());
     var canonical = new StringBuilder();
     parts.forEach(part -> canonical.append(part.length()).append(':').append(part));

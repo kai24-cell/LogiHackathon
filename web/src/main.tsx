@@ -133,7 +133,7 @@ function App() {
       </section>
       {analysis && <AnalysisResult result={analysis} />}
       {workspace && snapshot && (
-        <div key={snapshot.snapshotId}>
+        <div key={workspace.id}>
           <CodeSearchPanel
             key={snapshot.snapshotId}
             selected={selected}
