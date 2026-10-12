@@ -33,6 +33,9 @@ class PackagingSafetyTest(unittest.TestCase):
             "service-account.json",
             "private.pem",
             "web/node_modules/pkg/index.js",
+            ".playwright-mcp/browser-state.json",
+            "docs/validation-results/answer.json",
+            "samples/user-workspaces/Application.java",
             "../outside.txt",
             "C:/outside.txt",
         ):
@@ -70,11 +73,17 @@ class PackagingSafetyTest(unittest.TestCase):
             "docs/design.docx": "binary",
             ".vscode/settings.json": "{}",
             "samples/example.java": "class Example {}",
+            "samples/api-validation/case.json": "{}",
+            "backend/src/main/resources/demo/answer.json": "{}",
         }
         entries = list(source_entries(zipped(fixture)))
         self.assertEqual(
             {name for name, _ in entries},
-            {"README.md", "docs/guide.md", "samples/example.java"},
+            {
+                "README.md", "docs/guide.md", "samples/example.java",
+                "samples/api-validation/case.json",
+                "backend/src/main/resources/demo/answer.json",
+            },
         )
 
     def test_artifact_inspection_rejects_embedded_credentials(self):

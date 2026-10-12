@@ -9,7 +9,10 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 SOURCE_ROOTS = {"backend", "web", "extension", "scripts", "samples", "docs", ".github"}
 ROOT_FILES = {"README.md", "AGENTS.md", ".gitignore", ".gitattributes", ".env.example"}
-FORBIDDEN_PARTS = {"node_modules", "target", "dist", ".git", ".cache", ".tools", "logs"}
+FORBIDDEN_PARTS = {
+    "node_modules", "target", "dist", ".git", ".cache", ".tools", "logs",
+    ".playwright-mcp", "validation-results", "user-workspaces",
+}
 FORBIDDEN_NAMES = {"runtime.json", "credentials.json", "application.properties.local"}
 SECRET_JSON_KEYS = {"private_key", "private_key_id", "client_secret", "refresh_token"}
 MAX_ENTRY_BYTES = 128 * 1024 * 1024

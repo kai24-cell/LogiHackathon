@@ -6,6 +6,8 @@ Gemini生成はキー設定後の明示的な送信操作で実APIを呼び出�
 
 WindowsのZIP展開・VSIX導入・起動・サンプル操作・停止・梱包は[導入ガイド](docs/installation-guide.md)を参照してください。#10の先行整備であり、#14のデモ認証、#8翻訳、#9会話/TXTの完成を示すものではありません。
 
+前提PRのマージ順は **#17（#14）→ #8翻訳 → #9会話/TXT → #19（#10）** です。この導入・梱包ブランチは#7までのmainが基点のため、前提合流後に最新mainで再ビルド・ZIP検査・展開先受入を行います。ブラウザ接続、実翻訳、会話引継ぎが未確認の間は、提出手順全体を完了扱いにしません。
+
 ## 設計書
 
 [詳細設計](docs/cheapreview_detailed_design_version02.md)を[旧要件・基本設計](docs/cheapreview_design_spec_version02.md)より優先します。

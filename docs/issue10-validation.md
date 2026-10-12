@@ -57,3 +57,13 @@ Ruffは導入されていないため、追加インストール・ruff format�
 Vite設定はoutDir/emptyOutDirを上書きしていないため、標準のproject内dist初期化を使用する。これだけを成功の根拠とせず、`verify_distribution_clean.py seed`→通常のbuild.ps1→`verify_distribution_clean.py check`を既存CIへ追加する。canaryはweb/dist、Spring static、Maven target/classes、extension/distに置き、生成先と最終jar/VSIXから消えることを検査する。追加依存・追加のnpm ciは不要。
 
 追加fixtureテスト3件成功（合計12件）。生成先のみのseed、既存canary非上書き、生成先/成果物内残存の拒否とclean判定を検証した。PowerShell 5.1でcleanup関数を偽のworkspaceへ適用し、static/extensionのcanary削除と許可リスト外拒否を確認した。親の実梱包とCIの通常ビルドでもcanary除去を確認済み。
+
+## 2026-10-12：前提PRと配布対象の更新
+
+利用者指示により、#14の接続・実ブラウザ受入は保留し、#8翻訳と#9会話/TXTを別PRで並行実装する。マージ順は17→8→9→19。PR19は#7ベースのままで前提の未マージ機能を取り込まず、合流後の最新mainによる整合確認・実ZIP再作成を必須の残作業とする。draft/Refs #10を維持し、Closes #10は付けない。
+
+導入ガイドに翻訳のbackend環境設定名・認証JSONのプロジェクト外保管・未設定時/再翻訳の確認項目、TXT引継ぎの受入項目を追記した。これは前提PR合流後の確認計画であり、このブランチで利用できる機能の追加ではない。
+
+梱包検査に.playwright-mcp/validation-results/user-workspacesを禁止ディレクトリとして追加。公開の専用サンプルcase.jsonと固定回答fixtureは保持し、実回答や利用者会話とは区別するfixtureを追加した。実キー・認証JSON・実回答は読み込まず、実API通信は行っていない。
+
+`python -m unittest discover -s scripts -p 'test_*distribution*.py' -v`の12件、変更Pythonの`py_compile`、`git diff --check`が成功。変更は梱包判定と文書・fixtureに限定し、Java/Web/拡張の再ビルドはこの追記では行っていない。最新push後の通常ビルド・既存チェックはCIで確認する。
